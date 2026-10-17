@@ -785,7 +785,7 @@
 
   function canManageParticipant(p) {
     const me = (state.participants || []).find(item => item && item.name === state.youName);
-    return !!(state.isHost && !state.selfSpectator && me && me.isHost && !isSpectator(me) &&
+    return !!(state.isHost && me && me.isHost &&
       p && p.name !== state.youName && !p.isHost);
   }
 

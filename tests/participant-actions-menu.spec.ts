@@ -140,13 +140,33 @@ test('guest/spectator and forged self targets cannot invoke the action UI', asyn
     await expect(row(guest, 'Host')).toHaveClass(/is-host/);
     await expect(row(guest, 'Host')).not.toHaveClass(/spectator/);
     await expect(guest.locator('.participant-more')).toHaveCount(0);
-    // A host who opts out of estimating has no participant-action controls either.
+    // Participation state does not remove host permissions.
     await host.locator('#menuButton').click();
     await host.locator('#menuParticipationToggle').uncheck({ force: true });
     await host.locator('#menuCloseButton').click();
     await expect(row(host, 'Host')).toHaveClass(/spectator/);
-    await expect(host.locator('.participant-more')).toHaveCount(0);
-    await forge(host, 'Guest');
+    await expect(row(host, 'Host')).toHaveClass(/is-host/);
+    await expect(row(host, 'Guest').locator('.participant-more')).toBeVisible();
+    await forge(host, 'Host');
+
+    // The host can still manage another participant while not estimating.
+    await row(host, 'Guest').locator('.participant-more').click();
+    await host.getByRole('menuitem', { name: 'Restore participation' }).click();
+    await expect(row(guest, 'Guest')).not.toHaveClass(/spectator/);
+    await expect.poll(() => hostSent).toEqual(['setSpectator:Guest:true', 'setSpectator:Guest:false']);
+
+    // The state and permissions survive the regular refresh/rejoin path.
+    await host.reload();
+    await expect(row(host, 'Host')).toHaveClass(/spectator/);
+    await expect(row(host, 'Host')).toHaveClass(/is-host/);
+    await expect(row(host, 'Guest').locator('.participant-more')).toBeVisible();
+
+    // Re-enabling estimation leaves the same host permissions in place.
+    await host.locator('#menuButton').click();
+    await host.locator('#menuParticipationToggle').check({ force: true });
+    await host.locator('#menuCloseButton').click();
+    await expect(row(host, 'Host')).not.toHaveClass(/spectator/);
+    await expect(row(host, 'Guest').locator('.participant-more')).toBeVisible();
   } finally { await p.close(); }
 });
 

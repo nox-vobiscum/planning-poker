@@ -2,7 +2,6 @@ package com.example.planningpoker.controller;
 
 import com.example.planningpoker.persistence.PersistentRooms;
 import com.example.planningpoker.service.GameService;
-import com.example.planningpoker.model.Room;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Controller;
 import org.springframework.ui.Model;
@@ -91,12 +90,11 @@ public class GameController {
         model.addAttribute("cardsRow3", new String[]{"❓", "💬", "☕"});
 
         // Redirect to GET /room with encoded params to support refresh/deep-linking
-        // IMPORTANT: Add preflight=1 so the server runs the duplicate-name check ONLY on first entry.
+        // Rendering is not admission; only the authenticated WebSocket can admit a participant.
         return "redirect:/room?roomCode="
                 + org.springframework.web.util.UriUtils.encodeQueryParam(effectiveRoomCode, java.nio.charset.StandardCharsets.UTF_8)
                 + "&participantName="
-                + org.springframework.web.util.UriUtils.encodeQueryParam(pName, java.nio.charset.StandardCharsets.UTF_8)
-                + "&preflight=1";
+                + org.springframework.web.util.UriUtils.encodeQueryParam(pName, java.nio.charset.StandardCharsets.UTF_8);
     }
 
     // --- helpers ---
@@ -106,8 +104,7 @@ public class GameController {
 
     /**
      * Room view.
-     * Server-side duplicate-name preflight is executed ONLY when explicitly requested via ?preflight=1.
-     * This prevents unwanted redirects on reload/back-forward navigations.
+     * Legacy preflight URLs render too: a display name cannot authenticate or reject a resume.
      */
     @GetMapping("/room")
     public String getRoom(
@@ -118,7 +115,6 @@ public class GameController {
 
         String rCode = safeTrim(roomCode);
         String pName = safeTrim(participantName);
-        final boolean runPreflight = "1".equals(preflight); // explicit opt-in
 
         // Missing room → back to landing
         if (rCode.isEmpty()) {
@@ -132,19 +128,7 @@ public class GameController {
             return "invite";
         }
 
-        // --- Server-side safety net: only run when explicitly flagged via ?preflight=1 ---
-        if (runPreflight) {
-            Room room = gameService.getRoom(rCode);
-            if (room != null && room.nameInUse(pName)) {
-                return "redirect:/invite?roomCode="
-                        + org.springframework.web.util.UriUtils.encodeQueryParam(rCode, java.nio.charset.StandardCharsets.UTF_8)
-                        + "&participantName="
-                        + org.springframework.web.util.UriUtils.encodeQueryParam(pName, java.nio.charset.StandardCharsets.UTF_8)
-                        + "&nameTaken=1";
-            }
-        }
-
-        // Both params present (and either preflight passed or not requested) → render the room
+        // Room data and commands remain gated by WebSocket authentication.
         model.addAttribute("participantName", pName);
         model.addAttribute("roomCode", rCode);
 

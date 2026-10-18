@@ -1,6 +1,5 @@
 package com.example.planningpoker.controller;
 
-import com.example.planningpoker.model.Room;
 import com.example.planningpoker.service.GameService;
 import org.springframework.web.bind.annotation.*;
 
@@ -27,13 +26,6 @@ public class RoomNameCheckController {
             @PathVariable String roomCode,
             @RequestParam String name
     ) {
-        String rc = roomCode == null ? "" : roomCode.trim();
-        String n  = name == null ? "" : name.trim();
-        if (rc.isEmpty() || n.isEmpty()) return false;
-
-        Room room = gameService.getRoom(rc);
-        if (room == null) return false;
-
-        return room.nameInUse(n);
+        return !gameService.nameAvailability(roomCode, name).available();
     }
 }

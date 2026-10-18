@@ -14,7 +14,7 @@
       .replace(/"/g, '&quot;');
   }
 
-  // Ensure we always submit to POST /join (server then redirects to /room?preflight=1).
+  // Ensure we always submit to POST /join (server then renders the room; the socket authenticates).
   function ensureJoinDestination(form) {
     if (!form) return;
     try {
@@ -70,12 +70,16 @@
   }
 
   // --- main check -----------------------------------------------------------
+  let checkGeneration = 0;
   async function checkAndMaybeAdjustName(e) {
     const form = e.currentTarget;
     const nameInput = $('input[name="participantName"]', form);
     const roomInput = $('input[name="roomCode"]', form);
     if (!nameInput || !roomInput) return;
 
+    const generation = ++checkGeneration;
+    const current = () => generation === checkGeneration &&
+      safe(nameInput.value) === rawName && safe(roomInput.value) === roomCode;
     const rawName = safe(nameInput.value);
     const roomCode = safe(roomInput.value);
     if (!rawName || !roomCode) return; // let server-side validation handle
@@ -84,23 +88,26 @@
     e.preventDefault();
     clearNotice();
 
-    // Always make sure we're submitting to POST /join (server adds ?preflight=1)
+    // Always submit to POST /join; candidate proofs are sent only over WebSocket.
     ensureJoinDestination(form);
+
+    if (window.PPIdentity.read(roomCode)) { form.submit(); return; }
 
     const url = `/api/rooms/${enc(roomCode)}/name-available?name=${enc(rawName)}`;
     console.debug('[invite-name-check] checking', { roomCode, rawName, url });
 
     try {
-      const resp = await fetch(url, { headers: { 'Accept': 'application/json' } });
+      const resp = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
 
       if (!resp.ok) {
         console.warn('[invite-name-check] API not OK:', resp.status);
-        form.submit(); // be permissive on API failures
+        if (current()) form.submit(); // WebSocket admission still checks the name.
         return;
       }
 
       const data = await resp.json();
-      console.debug('[invite-name-check] API response', data);
+      if (!current()) return;
+      if (window.PPIdentity.read(roomCode)) { form.submit(); return; }
 
       if (data && data.available === false && data.suggestion && data.suggestion !== rawName) {
         // Robust fallback: confirm() first (works even without CSS)
@@ -120,7 +127,7 @@
           rawName,
           data.suggestion,
           // onAccept
-          () => { nameInput.value = data.suggestion; clearNotice(); ensureJoinDestination(form); form.submit(); },
+          () => { if (!current()) return; nameInput.value = data.suggestion; clearNotice(); ensureJoinDestination(form); form.submit(); },
           // onEdit
           () => { clearNotice(); nameInput.focus(); nameInput.select?.(); }
         );
@@ -133,12 +140,12 @@
 
     // Either available or API unreachable → submit as-is
     ensureJoinDestination(form);
-    form.submit();
+    if (current()) form.submit();
   }
 
   // --- bootstrapping --------------------------------------------------------
   document.addEventListener('DOMContentLoaded', function () {
-    console.debug('[invite-name-check] loaded v5');
+    console.debug('[invite-name-check] loaded v6');
     const form = findInviteForm();
     if (!form) { console.warn('[invite-name-check] form not found'); return; }
 
@@ -146,13 +153,21 @@
     ensureJoinDestination(form);
 
     // If server redirected here with nameTaken=1 (legacy path), show an immediate hint
-    if (qp('nameTaken') === '1') {
+    if (qp('nameTaken') === '1' && !window.PPIdentity.read(safe($('input[name="roomCode"]', form)?.value))) {
       alert('This name is already used in this room. Please choose a unique display name.');
     }
 
     // Clear inline notice whenever user edits the name
     const nameInput = $('input[name="participantName"]', form);
-    if (nameInput) nameInput.addEventListener('input', clearNotice);
+    form.addEventListener('input', () => { checkGeneration++; clearNotice(); });
+    if (qp('rejoin') === 'invalid' && nameInput) {
+      const notice = ensureNoticeAfter(nameInput);
+      notice.setAttribute('role', 'status');
+      const de = (document.documentElement.lang || 'en').startsWith('de');
+      notice.textContent = de
+        ? 'Die bisherige Teilnahme ist nicht mehr gültig. Mit „Beitreten“ startest du eine neue Teilnahme.'
+        : 'Your previous participation is no longer valid. Select Join to start a new participation.';
+    }
 
     form.addEventListener('submit', checkAndMaybeAdjustName, { once: false });
   });

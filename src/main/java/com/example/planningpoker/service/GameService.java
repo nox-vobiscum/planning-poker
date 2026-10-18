@@ -128,6 +128,25 @@ public class GameService {
     public Room getRoom(String roomCode) { return rooms.get(roomCode); }
     public Room room(String roomCode) { return getRoom(roomCode); }
 
+    public record NameAvailability(boolean available, String suggestion) {}
+
+    /** Advisory only: the WebSocket handshake performs the final atomic reservation. */
+    public NameAvailability nameAvailability(String roomCode, String requestedName) {
+        String code = roomCode == null ? "" : roomCode.trim();
+        String name = requestedName == null ? "" : requestedName.trim();
+        Room room = getRoom(code); // Never create a room or read a persisted snapshot.
+        if (room == null || name.isEmpty()) return new NameAvailability(true, name);
+        synchronized (room) {
+            if (!room.nameUnavailable(name)) return new NameAvailability(true, name);
+            String base = name.replaceFirst(" \\([0-9]+\\)$", "");
+            String suggestion = base;
+            for (int suffix = 2; room.nameUnavailable(suggestion); suffix++) {
+                suggestion = base + " (" + suffix + ")";
+            }
+            return new NameAvailability(false, suggestion);
+        }
+    }
+
     // --- ws session tracking ---
     public void addSession(WebSocketSession session, Room room) { sessionToRoomMap.put(session, room); }
     public void trackParticipant(WebSocketSession session, String participantName) { sessionToParticipantMap.put(session, participantName); }

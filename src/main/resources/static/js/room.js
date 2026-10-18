@@ -4,7 +4,7 @@
    - Wake-ups on visibilitychange / focus / online / pageshow (poke + resync)
    - Exponential backoff reconnect w/ jitter
    - English inline comments & "Spectator" wording
-   - Name preflight once per (room+name) per tab
+   - WebSocket admission is authoritative for both new joins and resumes
    - Specials revamp (host-defined extras, "❓" always included)
 */
 (() => {
@@ -125,9 +125,6 @@
     _optimisticVote: null,
     hardRedirect: null,
 
-    // preflight guards
-    _preflightMarkedOk: false,
-
     // short pending guard for local sequence changes
     _pendingSeq: null,
     _pendingSeqUntil: 0
@@ -137,7 +134,7 @@
   let identityBlocked = false;
   let exitRequested = false;
   // Canonicalize URL params (no reload) for shareable links
-  (function canonicalizeRoomUrl() {
+  function canonicalizeRoomUrl() {
     try {
       const desiredQs = new URLSearchParams({
         roomCode: state.roomCode || '',
@@ -149,7 +146,8 @@
         history.replaceState(null, '', newUrl);
       }
     } catch {}
-  })();
+  }
+  canonicalizeRoomUrl();
 
   /*** ---------- Helpers ---------- ***/
   function normalizeSeq(id) {
@@ -427,7 +425,11 @@
         }
         if (identity.type === 'identityReady') {
           state.connected = true;
-          if (identity.yourName) state.youName = identity.yourName;
+          if (identity.yourName) {
+            state.youName = identity.yourName;
+            setText('#youName', state.youName);
+            canonicalizeRoomUrl();
+          }
           resetReconnectBackoff(); startHeartbeat(); startWatchdog();
           send('requestSync');
           if (exitRequested) send('intentionalLeave');
@@ -442,7 +444,15 @@
           if (identity.reason === 'expired' && identityCredential) return;
           identityBlocked = true;
           stopHeartbeat(); stopWatchdog();
-          if (identity.reason === 'invalid') window.PPIdentity.clear(state.roomCode, identityCredential);
+          if (identity.reason === 'invalid' || identity.reason === 'nameTaken') {
+            if (identity.reason === 'invalid') window.PPIdentity.clear(state.roomCode, identityCredential);
+            window.PPRoomReturn?.clear(state.roomCode);
+            const reason = identity.reason === 'invalid' ? '&rejoin=invalid' : '&nameTaken=1';
+            state.hardRedirect = '/invite?roomCode=' + encodeURIComponent(state.roomCode) +
+              '&participantName=' + encodeURIComponent(state.youName) + reason;
+            location.replace(state.hardRedirect);
+            return;
+          }
           const active = identity.reason === 'activeElsewhere';
           showToast(active
             ? (isDe() ? 'Diese Teilnahme ist bereits in einem anderen Fenster aktiv.' : 'This participation is already active in another window.')
@@ -2287,55 +2297,6 @@
 
   document.addEventListener('pp:lang-changed', onLangChange);
   
-  /*** ---------- Name preflight: run once per (room+name) per tab ---------- ***/
-  async function preflightNameCheck() {
-    if (identityCredential) return; // The server authenticates this resume, not the display name.
-    let isReloadLike = false;
-    try {
-      var nav = null;
-      if (typeof performance !== 'undefined' && performance.getEntriesByType) {
-        var arr = performance.getEntriesByType('navigation');
-        if (arr && arr[0]) nav = arr[0];
-      }
-      if (nav && (nav.type === 'reload' || nav.type === 'back_forward')) isReloadLike = true;
-    } catch {}
-    if (isReloadLike) return;
-
-    const pfKey = 'pp-pf-ok:' + state.roomCode + ':' + state.youName;
-
-    try {
-      if (window.PPStorage.read('sessionStorage', pfKey, value => value === '1') === '1') {
-        state._preflightMarkedOk = true;
-        return;
-      }
-    } catch {}
-
-    try {
-      const preflightParam = (url && url.searchParams && url.searchParams.get('preflight')) || null;
-      if (preflightParam === '1') {
-        try { sessionStorage.setItem(pfKey, '1'); state._preflightMarkedOk = true; } catch {}
-        return;
-      }
-    } catch {}
-
-    try {
-      const apiUrl = '/api/rooms/' + encodeURIComponent(state.roomCode) + '/name-available?name=' + encodeURIComponent(state.youName);
-      const resp = await fetch(apiUrl, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
-
-      if (resp.ok) {
-        const data = await resp.json();
-        if (data && data.available === false) {
-          window.PPRoomReturn?.clear(state.roomCode, state.youName);
-          const redirectUrl = '/invite?roomCode=' + encodeURIComponent(state.roomCode) + '&participantName=' + encodeURIComponent(state.youName) + '&nameTaken=1';
-          state.hardRedirect = redirectUrl;
-          location.replace(redirectUrl);
-          return;
-        }
-        try { sessionStorage.setItem(pfKey, '1'); state._preflightMarkedOk = true; } catch {}
-      }
-    } catch { /* be permissive */ }
-  }
-
   /*** ---------- Boot ---------- ***/
   function seedSelfPlaceholder() {
     state.participants = [{
@@ -2353,7 +2314,6 @@
   async function boot() {
     preloadMessages();
 
-    await preflightNameCheck();
     if (state.hardRedirect || identityBlocked) return;
 
     syncHostClass();

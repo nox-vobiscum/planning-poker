@@ -60,6 +60,7 @@
   </section>
   </main>
 
+  <script src="/js/identity.js?v=1"></script>
   <script>
   (function(){
     const form  = document.getElementById('joinForm');
@@ -78,7 +79,12 @@
       } catch {}
     });
 
+    let checkGeneration = 0;
+    form.addEventListener('input', () => { checkGeneration++; });
     form.addEventListener('submit', async (e) => {
+      const generation = ++checkGeneration;
+      const current = () => generation === checkGeneration &&
+        nameI.value.trim() === n && roomI.value.trim() === r;
       e.preventDefault(); // manual submit after checks
 
       const n = (nameI.value || '').trim();
@@ -95,12 +101,17 @@
         localStorage.setItem('pp-room', r);
       } catch {}
 
-      // async name-taken check (best-effort)
+      // A stored proof is only a resume candidate; the WebSocket authenticates it.
+      if (window.PPIdentity.read(r)) { form.submit(); return; }
+
+      // Advisory name check for a new participation.
       try {
         const url = `/api/rooms/${encodeURIComponent(r)}/name-taken?name=${encodeURIComponent(n)}`;
-        const res = await fetch(url, { headers: { 'Accept': 'application/json' } });
+        const res = await fetch(url, { headers: { 'Accept': 'application/json' }, cache: 'no-store' });
         if (res.ok) {
           const taken = await res.json(); // boolean
+          if (!current()) return;
+          if (window.PPIdentity.read(r)) { form.submit(); return; }
           if (taken === true) {
             alert('This name is already used in this room. Please choose a unique display name.');
             nameI.focus();
@@ -109,7 +120,7 @@
         }
       } catch {}
 
-      form.submit();
+      if (current()) form.submit();
     });
   })();
   </script>

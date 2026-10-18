@@ -24,8 +24,6 @@ public class IdentityWebSocketHandler extends TextWebSocketHandler {
     private final JsonMapper json = new JsonMapper();
     private final LongSupplier clock;
     private final Map<String, Connection> connections = new ConcurrentHashMap<>();
-    // Pending first deliveries reserve a name only until acknowledgement/timeout.
-    private final Map<Room, Map<String, String>> reservations = new ConcurrentHashMap<>();
     private final ScheduledExecutorService sweeper;
 
     @org.springframework.beans.factory.annotation.Autowired
@@ -123,12 +121,10 @@ public class IdentityWebSocketHandler extends TextWebSocketHandler {
                 } else {
                     c.name = string(request, "participantName").trim();
                     if (c.name.isEmpty() || c.name.length() > 80) { reject(c, "invalid", 4401); return; }
-                    Map<String, String> pending = reservations.computeIfAbsent(room, ignored -> new HashMap<>());
-                    if (room.nameInUse(c.name) || pending.containsKey(c.name)) {
+                    if (!room.reserveName(c.name, c.session.getId())) {
                         reject(c, "nameTaken", 4005); return;
                     }
                     credential = room.identities().issue();
-                    pending.put(c.name, c.session.getId());
                     c.fresh = true;
                 }
                 Claim claim = room.identities().claim(credential, c.session.getId());
@@ -208,11 +204,7 @@ public class IdentityWebSocketHandler extends TextWebSocketHandler {
     }
 
     private void releaseReservation(Connection c) {
-        Map<String, String> pending = reservations.get(c.room);
-        if (pending != null) {
-            pending.remove(c.name, c.session.getId());
-            if (pending.isEmpty()) reservations.remove(c.room, pending);
-        }
+        c.room.releaseName(c.name, c.session.getId());
     }
 
     private void detach(Connection c) {

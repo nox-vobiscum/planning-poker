@@ -1,5 +1,8 @@
 # Participant identity and rejoin implementation
 
+Current status: steps 1–3 completed on the feature branch. Steps 4–6 remain.
+No production rollout is approved by completion of this step.
+
 ## Step 1: isolated identity core (completed)
 
 Branch: `fix/participant-identity-rejoin`.
@@ -69,14 +72,13 @@ expiry sweeps, final revocation, closure/recreation, shared transaction monitor,
 invalid ownership handles and monotonic-clock wraparound. Time tests use an
 injected clock without sleeps; concurrent claims use a start barrier.
 
-## Remaining approved plan after step 2 (requires separate authorization)
+## Remaining approved plan after step 3 (requires separate authorization)
 
-3. Unify entry points and live-state name checks.
 4. Complete exit acknowledgements, retries and storage-failure behavior.
 5. Run focused backend and Chromium/WebKit integration checks; manual iPhone PWA check.
 6. Update final architecture/API/user/deployment docs and prepare a controlled rollout.
 
-STOP after step 2. No push or deployment. The branch is not yet ready for rollout.
+STOP after step 3. No push or deployment. The branch is not yet ready for rollout.
 
 ## Step 2: authenticated connection and lifecycle integration (completed)
 
@@ -166,11 +168,11 @@ remaining integration checks and the manual iPhone test.
 No full regression suite, production push or deployment. The test server used a
 separate local port. The real iPhone/PWA check and the complete entry-path matrix
 remain part of the later plan.
-## Step 3 handoff: prepared, NOT implemented
+## Step 3 handoff: historical preparation (implemented below)
 
 Baseline: `d42b185` on `fix/participant-identity-rejoin` (step 2), preceded by
 `c1d585e` (step 1). Preparation changes documentation only. Do not push to main:
-main triggers production deployment. Wait for explicit authorization to start step 3.
+main triggers production deployment. This handoff was prepared before step 3 was authorized.
 
 ### Verified remaining blockers
 
@@ -258,3 +260,74 @@ Run `npm run e2e:buildcheck` after TypeScript edits.
 - Suggested restart instruction: "Implement step 3 from the handoff in
   docs/PARTICIPANT-IDENTITY-REJOIN.md. Run only targeted tests, document and commit
   separately, then STOP. No deployment."
+
+## Step 3: unified entry points and live name checks (completed)
+
+Completed on 2026-10-18. Scope: entry/admission paths only; no gameplay, layout,
+permissions, protocol messages, lease durations or participant lifecycle changes.
+
+### Changes
+
+- Both name APIs now delegate to GameService's live availability/suggestion query,
+  under the Room monitor. Comparison remains trimmed and case-sensitive. Inactive
+  participants and pending initial grants reserve their names. Persisted snapshots
+  are no longer a name-availability source; reads neither create rooms nor reserve
+  names. Response shapes remain unchanged.
+- Pending name reservations moved from the gateway's private map into the live
+  Room, with conditional release by connection ID. There is only one reservation
+  source. The WebSocket handshake still performs the final atomic check, so an
+  advisory HTTP result cannot authorize a duplicate join.
+- Home and invitation forms load the shared identity bootstrap. A candidate proof
+  bypasses name-only feedback and proceeds to server-authenticated resume. Proofs
+  are never submitted through form fields, URLs or name APIs.
+- HTTP /room rendering no longer rejects a participant solely because their name
+  exists, including legacy preflight=1 URLs. POST /join retains required-field
+  validation and stops adding that flag. Rendering grants no room-state access.
+- Removed room.js's name-only preflight and pp-pf-ok cache dependency. Direct entry,
+  refresh and Back use the same authenticated WebSocket path. identityReady updates
+  the visible name and canonical URL from the server, even with a stale form name.
+- Invalid/revoked/wrong-instance proof rejection clears only the matching proof
+  and the current room-return target, then renders the invitation form with an
+  explanation. The user must explicitly submit to start a new participation.
+  There is no automatic New Join after a failed resume or active-owner takeover.
+  Name conflicts from the final handshake return to the existing name-entry flow.
+- Asynchronous form checks use a generation and room/name comparison. Old responses
+  cannot submit edited fields or replace current feedback.
+
+### Targeted validation
+
+**42 Java tests passed**:
+RoomNameCheckControllerTest (5), IdentityWebSocketHandlerTest (18),
+RoomIdentityRegistryTest (13), GameServiceNameTests (3), RoomTest (3).
+
+The new/extended cases cover agreement of both APIs for active/inactive/pending/
+free names, case and whitespace handling, suggestions, conditional reservation
+release, no room creation on reads/rendering, legacy preflight, POST validation,
+reservation timeout/disconnect, room isolation and competing new joins after a
+successful advisory availability query.
+
+**12 focused browser cases passed**:
+
+- Six new cases across Chromium and WebKit: home/invite/direct/preflight/reload/
+  Back entry; canonical name, participant UUID, vote and spectator preservation;
+  new browser context retaining localStorage but no sessionStorage; invalid proof
+  requiring deliberate New Join; no identity restoration by display name; room
+  isolation and matching-proof clearing; stale name-check responses ignored.
+- Two existing Chromium/WebKit identity-handshake cases: parallel-tab refusal,
+  reload, proof exclusion from URLs/debug history, acknowledged exit/new identity.
+- Existing spectator refresh/Back/reconnect case and invitation suggestion case.
+- Two existing room-return cases: About/Home return and duplicate-name loop guard.
+
+The first run of the two new state-preservation cases waited on the obsolete
+away marker. The test was corrected to wait for the server's disconnected flag;
+both corrected cases passed. No application change was needed for that correction.
+TypeScript buildcheck, JavaScript syntax checks and diff whitespace check passed.
+No full suite was run. Browser checks used the isolated local server on port 8091.
+A new browser context is a restart approximation, not a real iPhone/PWA validation.
+
+### Next boundary
+
+Step 4 remains separately gated: lost exit acknowledgement/idempotent retry UX,
+storage-failure behavior and migration. Steps 5–6 retain the remaining integration
+matrix, manual iPhone/PWA verification, final documentation and rollout gate.
+No push or deployment was performed. STOP after this separate step-3 commit.

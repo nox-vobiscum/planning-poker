@@ -14,6 +14,23 @@ public class Room {
     // ---------------------------------------------------------------------
 
     private final String code;
+
+    // Pending grants share the live Room monitor and are never snapshot state.
+    private final Map<String, String> pendingNames = new HashMap<>();
+
+    public synchronized boolean nameUnavailable(String name) {
+        return nameInUse(name) || pendingNames.containsKey(name);
+    }
+
+    public synchronized boolean reserveName(String name, String connectionId) {
+        if (nameUnavailable(name)) return false;
+        pendingNames.put(name, connectionId);
+        return true;
+    }
+
+    public synchronized void releaseName(String name, String connectionId) {
+        pendingNames.remove(name, connectionId);
+    }
     private final com.example.planningpoker.service.RoomIdentityRegistry identities;
 
     public com.example.planningpoker.service.RoomIdentityRegistry identities() { return identities; }

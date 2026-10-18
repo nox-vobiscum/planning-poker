@@ -95,6 +95,7 @@ class IdentityWebSocketHandlerTest {
 
     @Test void initialGrantRequiresAcknowledgementAndAbandonedReservationExpires() throws Exception {
         Client pending = client(); Map<String, Object> lost = begin(pending, "Host");
+        assertFalse(service.nameAvailability("room", "Host").available());
         assertNull(service.getRoom("room").getParticipant("Host"));
         assertTrue(pending.last("roomState").isEmpty());
         Client collision = client();
@@ -102,11 +103,46 @@ class IdentityWebSocketHandlerTest {
         assertEquals("nameTaken", collision.last("identityError").get("reason"));
         advance(30); gateway.sweep();
         assertFalse(pending.open.get());
+        assertTrue(service.nameAvailability("room", "Host").available());
         Client fresh = client(); join(fresh, "Host");
         Client stale = client(); resume(stale, lost);
         assertEquals("invalid", stale.last("identityError").get("reason"));
     }
 
+    @Test void advisoryAvailabilityDoesNotPermitTwoConcurrentNewJoins() throws Exception {
+        Client a = client(), b = client();
+        assertTrue(service.nameAvailability("room", "Same").available());
+        ExecutorService pool = Executors.newFixedThreadPool(2);
+        CountDownLatch start = new CountDownLatch(1);
+        try {
+            List<Future<?>> attempts = new ArrayList<>();
+            for (Client c : List.of(a, b)) {
+                attempts.add(pool.submit(() -> {
+                    try { start.await(); } catch (InterruptedException e) { throw new RuntimeException(e); }
+                    c.send(Map.of("version", 2, "type", "newJoin", "roomCode", "room", "participantName", "Same"));
+                }));
+            }
+            start.countDown();
+            for (Future<?> attempt : attempts) attempt.get(5, TimeUnit.SECONDS);
+            Client winner = a.last("identityGrant").isEmpty() ? b : a;
+            Client loser = winner == a ? b : a;
+            assertEquals("nameTaken", loser.last("identityError").get("reason"));
+            assertTrue(loser.last("identityGrant").isEmpty());
+            winner.send("identityAck");
+            assertEquals(1, service.getRoom("room").getParticipants().size());
+            assertEquals("Same", winner.last("identityReady").get("yourName"));
+            assertFalse(service.nameAvailability("room", "Same").available());
+        } finally { pool.shutdownNow(); }
+    }
+
+    @Test void pendingDisconnectReleasesOnlyItsOwnRoomReservation() throws Exception {
+        Client pending = client(); begin(pending, "Same");
+        var other = service.getOrCreateRoom("other");
+        assertTrue(other.reserveName("Same", "other-socket"));
+        pending.disconnect();
+        assertTrue(service.nameAvailability("room", "Same").available());
+        assertFalse(service.nameAvailability("other", "Same").available());
+    }
     @Test void handshakeDeadlineIsEnforcedWithoutADisconnectEvent() throws Exception {
         Client c = client(); advance(10); gateway.sweep();
         assertFalse(c.open.get());

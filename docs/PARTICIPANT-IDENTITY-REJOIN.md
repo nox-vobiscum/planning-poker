@@ -1,6 +1,6 @@
 # Participant identity and rejoin implementation
 
-Current status: steps 1–3 completed on the feature branch. Steps 4–6 remain.
+Current status: steps 1–4 completed on the feature branch. Steps 5–6 remain.
 No production rollout is approved by completion of this step.
 
 ## Step 1: isolated identity core (completed)
@@ -74,7 +74,6 @@ injected clock without sleeps; concurrent claims use a start barrier.
 
 ## Remaining approved plan after step 3 (requires separate authorization)
 
-4. Complete exit acknowledgements, retries and storage-failure behavior.
 5. Run focused backend and Chromium/WebKit integration checks; manual iPhone PWA check.
 6. Update final architecture/API/user/deployment docs and prepare a controlled rollout.
 
@@ -327,7 +326,74 @@ A new browser context is a restart approximation, not a real iPhone/PWA validati
 
 ### Next boundary
 
-Step 4 remains separately gated: lost exit acknowledgement/idempotent retry UX,
-storage-failure behavior and migration. Steps 5–6 retain the remaining integration
-matrix, manual iPhone/PWA verification, final documentation and rollout gate.
-No push or deployment was performed. STOP after this separate step-3 commit.
+Steps 5–6 retain the remaining integration matrix, manual iPhone/PWA verification,
+final documentation and rollout gate. No push or deployment was performed.
+
+## Step 4: exit recovery and browser-storage resilience (completed)
+
+Completed on 2026-10-18. Scope: proof-bound exit recovery and identity-storage
+behavior only. Gameplay, permissions, room snapshots and identity authority remain
+unchanged.
+
+### Exit completion and retry
+
+- Before sending `intentionalLeave`, the client records a small exit marker bound
+  to the current room-instance and participant UUID. It contains no token and is
+  not an authorization source.
+- A normal `exited` response or the existing 4400 close completes the exit, clears
+  only the matching proof/marker and room-return target, then navigates home.
+- If the command was processed but its acknowledgement was lost, reconnect receives
+  the expected invalid-proof result. A matching pending exit treats that result as
+  successful completion rather than offering a new participation.
+- If the command did not reach the server, resume authenticates the existing proof;
+  `identityReady` then retries the same final command. The server-side revocation
+  boundary prevents duplicate lifecycle actions.
+- Explicit exit now emits exactly one `participantLeft` roster event after final
+  removal. This fixes stale participant rows for remaining clients while retaining
+  the existing host-transfer grace and payload shape.
+- Kick, room closure and unrelated invalid-proof cleanup also remove only a matching
+  pending-exit marker. Active-owner rejection remains unchanged and is never treated
+  as successful exit.
+
+### Storage fallback and migration
+
+- Identity proof writes prefer localStorage, fall back to sessionStorage and finally
+  to in-memory continuity. Session-only and memory-only modes show a clear notice
+  about their restoration limit while leaving the current participation usable.
+- A session fallback is promoted to localStorage when durable storage becomes
+  available. A successful local write removes an older session fallback, preventing
+  stale proof resurrection.
+- Proof and exit cleanup remain conditional on the expected identity, so an older
+  page cannot delete a successor proof or marker.
+- Obsolete `pp-cid` and `pp-pf-ok:*` session keys are removed during identity
+  bootstrap. They are no longer read and cannot affect admission.
+
+### Targeted validation
+
+**41 Java tests passed**: IdentityWebSocketHandlerTest (18),
+RoomIdentityRegistryTest (13), GameServiceNameTests (3), GameServiceSendTest (4)
+and RoomTest (3). The exit test now also proves that remaining clients receive one
+roster-removal event and that the revoked proof cannot restore state.
+
+**16 focused browser cases passed** across the final run plus the corrected exact-row
+rerun: Chromium/WebKit lost-ack completion, retry when the original command was not
+processed, fresh identity after exit, existing handshake/parallel-tab behavior,
+memory-only notice/current usability, browser-storage migration and stale fallback
+protection, host/guest/keyboard exit behavior, and responsive exit controls.
+
+One existing exit test initially failed because it still expected an explicitly
+removed participant to remain as disconnected; that assertion was updated to the
+approved final-exit lifecycle. A later selector matched the new host-role label
+instead of the departed participant's name; exact name selection passed. Neither
+test correction required broader product behavior.
+
+TypeScript buildcheck, JavaScript syntax checks and diff whitespace checks passed.
+No full suite or real iPhone/PWA validation was run. The isolated browser-test server
+used port 8091 and was stopped afterward.
+
+### Next boundary
+
+Step 5 remains separately gated: complete the focused integration matrix and manual
+iPhone/PWA verification. Step 6 covers final architecture/API/user/deployment docs
+and the controlled rollout gate. No push or deployment was performed. STOP after
+this separate step-4 commit.

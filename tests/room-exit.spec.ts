@@ -21,7 +21,6 @@ test('host leaves individually, guest inherits host role, and room stays open', 
         } catch {}
       });
     });
-
     await host.locator('#menuButton').click();
     await expect(host.locator('#closeRoomBtn')).toBeVisible();
     await expect(host.locator('#menuLeaveRoomBtn')).toBeHidden();
@@ -31,6 +30,9 @@ test('host leaves individually, guest inherits host role, and room stays open', 
     await expect(host.locator('#roomReturn')).toBeHidden();
     await expect(guest.locator('body')).toHaveClass(/is-host/, { timeout: 12_000 });
     await expect(guest.locator('#cardGrid button').first()).toBeVisible();
+    await expect(guest.locator('#liveParticipantList .participant-row').filter({
+      has: guest.locator('.name', { hasText: /^Host$/ }),
+    })).toHaveCount(0);
     expect(await guest.evaluate(() => (window as any).__hostLeftEvents)).toBe(1);
     await guest.locator('#menuButton').click();
     await expect(guest.locator('#closeRoomBtn')).toBeVisible();
@@ -75,7 +77,7 @@ test('guest menu leave uses individual navigation and preserves host room', asyn
     await expect(host.locator('body')).toHaveClass(/is-host/);
     await expect(host.locator('#cardGrid button').first()).toBeVisible();
     await expect(host.locator('#liveParticipantList .participant-row').filter({ hasText: 'Guest' }))
-      .toHaveClass(/disconnected/, { timeout: 8_000 });
+      .toHaveCount(0);
   } finally {
     await hostContext.close();
     await guestContext.close();

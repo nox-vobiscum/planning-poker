@@ -132,7 +132,7 @@
 
   let identityCredential = window.PPIdentity.read(state.roomCode);
   let identityBlocked = false;
-  let exitRequested = false;
+  let exitRequested = window.PPIdentity.exitPending(state.roomCode, identityCredential);
   // Canonicalize URL params (no reload) for shareable links
   function canonicalizeRoomUrl() {
     try {
@@ -386,6 +386,7 @@
       stopHeartbeat();
       stopWatchdog();
 
+      if (exitRequested && ev.code === 4400) { completeExit(); return; }
       if (state.hardRedirect) { location.href = state.hardRedirect; return; }
       if (identityBlocked) return;
 
@@ -418,8 +419,9 @@
       try {
         const identity = JSON.parse(ev.data);
         if (identity.type === 'identityGrant') {
-          window.PPIdentity.save(state.roomCode, identity);
+          const storage = window.PPIdentity.save(state.roomCode, identity);
           identityCredential = window.PPIdentity.read(state.roomCode);
+          if (storage !== 'localStorage') showIdentityStorageNotice(storage);
           s.send('identityAck');
           return;
         }
@@ -442,10 +444,14 @@
         if (identity.type === 'identityError') {
           state.connected = false;
           if (identity.reason === 'expired' && identityCredential) return;
+          if (exitRequested && identity.reason === 'invalid') { completeExit(); return; }
           identityBlocked = true;
           stopHeartbeat(); stopWatchdog();
           if (identity.reason === 'invalid' || identity.reason === 'nameTaken') {
-            if (identity.reason === 'invalid') window.PPIdentity.clear(state.roomCode, identityCredential);
+            if (identity.reason === 'invalid') {
+              window.PPIdentity.clearExit(state.roomCode, identityCredential);
+              window.PPIdentity.clear(state.roomCode, identityCredential);
+            }
             window.PPRoomReturn?.clear(state.roomCode);
             const reason = identity.reason === 'invalid' ? '&rejoin=invalid' : '&nameTaken=1';
             state.hardRedirect = '/invite?roomCode=' + encodeURIComponent(state.roomCode) +
@@ -460,13 +466,11 @@
           return;
         }
         if (identity.type === 'exited') {
-          identityBlocked = true;
-          window.PPIdentity.clear(state.roomCode, identityCredential);
-          window.PPRoomReturn?.clear(state.roomCode, state.youName);
-          location.assign('/');
+          completeExit();
           return;
         }
         if (identity.type === 'kicked' || identity.type === 'roomClosed') {
+          window.PPIdentity.clearExit(state.roomCode, identityCredential);
           window.PPIdentity.clear(state.roomCode, identityCredential);
         }
       } catch { /* Non-JSON game frames continue below. */ }
@@ -1814,6 +1818,25 @@
       setTimeout(function () { tEl.remove(); }, ms + 600);
     } catch {}
   }
+
+  function showIdentityStorageNotice(storage) {
+    const sessionOnly = storage === 'sessionStorage';
+    showToast(isDe()
+      ? (sessionOnly
+          ? 'Die Teilnahme kann nur in dieser Browsersitzung wiederhergestellt werden.'
+          : 'Die Teilnahme kann nach einem Neuladen nicht wiederhergestellt werden.')
+      : (sessionOnly
+          ? 'Participation can only be restored in this browser session.'
+          : 'Participation cannot be restored after reloading.'), 6500);
+  }
+
+  function completeExit() {
+    identityBlocked = true;
+    window.PPIdentity.clearExit(state.roomCode, identityCredential);
+    window.PPIdentity.clear(state.roomCode, identityCredential);
+    window.PPRoomReturn?.clear(state.roomCode, state.youName);
+    location.assign('/');
+  }
   function inviteUrl() { return location.origin + '/invite?roomCode=' + encodeURIComponent(state.roomCode); }
   async function copyText(text) {
     try { await navigator.clipboard.writeText(text); return true; }
@@ -2006,6 +2029,8 @@
         return;
       }
       exitRequested = true;
+      const exitStorage = window.PPIdentity.markExit(state.roomCode, identityCredential);
+      if (exitStorage !== 'localStorage') showIdentityStorageNotice(exitStorage);
       send('intentionalLeave');
     };
     $('#leaveRoomBtn')?.addEventListener('click', leaveRoom);

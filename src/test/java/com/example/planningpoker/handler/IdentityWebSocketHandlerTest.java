@@ -59,6 +59,12 @@ class IdentityWebSocketHandlerTest {
             }
             return Map.of();
         }
+        long count(String type) {
+            return frames.stream().filter(frame -> {
+                try { return type.equals(json.readValue(frame, Map.class).get("type")); }
+                catch (Exception ignored) { return false; }
+            }).count();
+        }
         void disconnect() { open.set(false); gateway.afterConnectionClosed(socket, CloseStatus.NORMAL); }
     }
 
@@ -220,8 +226,10 @@ class IdentityWebSocketHandlerTest {
 
     @Test void exitReleasesNameButNeverRestoresOldProofOrState() throws Exception {
         Client old = client(); Map<String, Object> grant = join(old, "Host");
+        Client observer = client(); join(observer, "Observer");
         old.send("vote:Host:8"); old.send("participation:false"); old.send("intentionalLeave");
         assertFalse(old.last("exited").isEmpty());
+        assertEquals(1, observer.count("participantLeft"));
         assertNull(service.getRoom("room").getParticipant("Host"));
         assertNull(service.getClientName("room", (String) grant.get("participantId")));
         Client fresh = client(); Map<String, Object> replacement = join(fresh, "Host");

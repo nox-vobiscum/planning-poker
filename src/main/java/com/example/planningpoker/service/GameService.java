@@ -1044,6 +1044,9 @@ public class GameService {
             }
         }
         room.removeParticipant(name);
+        // Explicit exit removes the row immediately for remaining clients. The
+        // later host-transfer task must not be the only signal for roster cleanup.
+        broadcastParticipantLeft(room, name);
         // Keep the intentional-leave host grace; the removed host is no longer eligible.
         scheduler.schedule(() -> roomTransaction(room, () -> {
             if (getRoom(room.getCode()) != room) return;

@@ -1,6 +1,6 @@
 package com.example.planningpoker.config;
 
-import com.example.planningpoker.handler.GameWebSocketHandler;
+import com.example.planningpoker.handler.IdentityWebSocketHandler;
 import jakarta.annotation.PostConstruct;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -26,11 +26,11 @@ public class WebSocketConfig implements WebSocketConfigurer {
 
     private static final Logger log = LoggerFactory.getLogger(WebSocketConfig.class);
 
-    private final GameWebSocketHandler handler;
+    private final IdentityWebSocketHandler handler;
     private final List<String> allowedOrigins;
 
     public WebSocketConfig(
-            GameWebSocketHandler handler,
+            IdentityWebSocketHandler handler,
             @Value("${app.websocket.allowed-origins:*}") String allowed
     ) {
         this.handler = handler;

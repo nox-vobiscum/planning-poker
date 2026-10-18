@@ -132,8 +132,9 @@
 
   </div>
 
+  <script defer th:src="@{/js/identity.js?v=1}"></script>
   <!-- Room connector (bump v-param if clients cache JS) -->
-  <script defer th:src="@{/js/room.js?v=65}"
+  <script defer th:src="@{/js/room.js?v=66}"
           th:attr="data-participant=${participantName},data-room=${roomCode}"></script>
 
   <div th:replace="~{fragments/footer :: footer}"></div>

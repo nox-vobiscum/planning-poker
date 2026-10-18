@@ -14,6 +14,9 @@ public class Room {
     // ---------------------------------------------------------------------
 
     private final String code;
+    private final com.example.planningpoker.service.RoomIdentityRegistry identities;
+
+    public com.example.planningpoker.service.RoomIdentityRegistry identities() { return identities; }
 
     /** Participants by canonical name (insertion order preserved to keep a stable roster order). */
     private final Map<String, Participant> participants = new LinkedHashMap<>();
@@ -53,7 +56,11 @@ public class Room {
     // Construction
     // ---------------------------------------------------------------------
 
-    public Room(String code) {
+    public Room(String code) { this(code, System::nanoTime); }
+
+    public Room(String code, java.util.function.LongSupplier identityClock) {
+        identities = new com.example.planningpoker.service.RoomIdentityRegistry(
+                this, identityClock, com.example.planningpoker.service.RoomIdentityRegistry.DEFAULT_LEASE);
         this.code = (code == null || code.isBlank()) ? "demo" : code.trim();
     }
 

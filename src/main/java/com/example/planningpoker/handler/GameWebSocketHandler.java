@@ -24,7 +24,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 /**
  * WebSocket handler for /gameSocket.
- * - Joins by roomCode + cid + requested name (service enforces canonical/unique name)
+ * - Accepts only sessions bound by IdentityWebSocketHandler; legacy admission is disabled.
  * - Handles rename:<name>, votes, host actions, toggles
  * - Heartbeat: replies "pong" to client pings (keeps client watchdog happy)
  * - On unexpected close: schedules grace disconnect (GameService decides timing)
@@ -77,76 +77,30 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
         this.gameService = gameService;
     }
 
+    /** Legacy CID admission is disabled; the identity gateway is the only public entry. */
     @Override
     public void afterConnectionEstablished(@NonNull WebSocketSession session) throws Exception {
-        try {
-            Map<String, String> q = parseQuery(session.getUri());
-            final String roomCode    = q.getOrDefault("roomCode", "demo").trim();
-            final String initialName = q.getOrDefault("participantName", "Guest").trim();
-            final String cid         = q.getOrDefault("cid", "cid-" + session.getId()).trim();
-
-            log.info("WS OPEN room={} name={} cid={}", roomCode, initialName, cid);
-
-            // Reject if a different CID is already active under this name.
-            Room existing = gameService.getRoom(roomCode);
-            if (existing != null) {
-                Participant byName = existing.getParticipant(initialName);
-                if (byName != null && byName.isActive()) {
-                    var byCid = existing.getParticipantByCid(cid).orElse(null);
-                    boolean sameIdentity = (byCid != null && Objects.equals(byCid.getName(), byName.getName()));
-                    if (!sameIdentity) {
-                        log.warn("WS REJECT room={} name={} already in use by different CID", roomCode, initialName);
-                        sendRedirectAndClose(session, inviteUrl(roomCode, initialName, true),
-                                new CloseStatus(4005, "Name already in use"));
-                        return;
-                    }
-                }
-            }
-
-            // Join (service will pick a canonical unique name if needed)
-            Room room = gameService.join(roomCode, cid, initialName);
-
-            // Determine canonical name for this CID after join
-            String canonicalName = null;
-            try {
-                var opt = room.getParticipantByCid(cid);
-                if (opt.isPresent()) canonicalName = opt.get().getName();
-                if (canonicalName == null) canonicalName = gameService.getClientName(roomCode, cid);
-            } catch (Throwable ignored) {}
-            if (canonicalName == null) canonicalName = initialName;
-
-            // Track this session for service broadcasts
-            gameService.addSession(session, room);
-            gameService.trackParticipant(session, canonicalName);
-            gameService.cancelPendingDisconnect(room, canonicalName);
-
-            // Local index
-            bySession.put(session.getId(), new Conn(roomCode, cid, canonicalName));
-
-            // Tell the client its identity
-            gameService.sendIdentity(session, canonicalName, cid);
-
-            // Initial state snapshot (best-effort)
-            try { sendInitialStateSnapshot(session, room, roomCode); }
-            catch (Throwable t) { log.warn("WS INIT snapshot failed (room={}, name={}): {}", roomCode, canonicalName, t.toString()); }
-
-            // Roster replay for the just-joined client
-            try { replayRosterTo(session, room, canonicalName); }
-            catch (Throwable t) { log.warn("WS ROSTER replay failed (room={}, to={}): {}", roomCode, canonicalName, t.toString()); }
-
-        } catch (Throwable t) {
-            log.error("WS afterConnectionEstablished failed (sid={}, uri={})", session.getId(), safeUri(session), t);
-            try { session.close(CloseStatus.SERVER_ERROR); } catch (Exception ignore) {}
-            throw t;
-        }
+        session.close(new CloseStatus(4406, "Reload required"));
     }
 
+    void bindAuthenticated(WebSocketSession session, Room room, String participantId, String name) {
+        gameService.addSession(session, room);
+        gameService.trackParticipant(session, name);
+        bySession.put(session.getId(), new Conn(room.getCode(), participantId, name));
+        gameService.sendIdentity(session, name, null);
+        gameService.sendRoomState(session, room);
+    }
+
+    void forgetAuthenticated(WebSocketSession session) {
+        bySession.remove(session.getId());
+        gameService.removeSession(session);
+    }
     @Override
     protected void handleTextMessage(@NonNull WebSocketSession session,
                                      @NonNull TextMessage message) throws Exception {
         Conn c = bySession.get(session.getId());
         if (c == null) {
-            log.warn("WS message from unknown session sid={} payload={}", session.getId(), message.getPayload());
+            log.warn("WS message from unauthenticated session sid={}", session.getId());
             return;
         }
 
@@ -184,7 +138,7 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
                 bySession.put(session.getId(), new Conn(roomCode, cid, finalName));
                 gameService.trackParticipant(session, finalName);
-                gameService.sendIdentity(session, finalName, cid);
+                gameService.sendIdentity(session, finalName, null);
                 return;
             }
 
@@ -284,14 +238,15 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
             if (payload.startsWith("makeHost:")) {
                 if (!isHost(roomCode, c.name)) return;
                 String target = decode(payload.substring("makeHost:".length()));
-                gameService.makeHost(roomCode, target);
+                if (!target.equals(c.name)) gameService.makeHost(roomCode, target);
                 return;
             }
             if (payload.startsWith("kick:")) {
                 if (!isHost(roomCode, c.name)) return;
                 String target = decode(payload.substring("kick:".length()));
                 Room room = gameService.getRoom(roomCode);
-                if (room != null) gameService.kickParticipant(room, target);
+                if (room != null && !target.equals(c.name) && room.getParticipant(target) != null
+                        && !room.getParticipant(target).isHost()) gameService.kickParticipant(room, target);
                 return;
             }
 
@@ -317,7 +272,10 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                         (byParticipating ? "setParticipating" : "setSpectator"),
                         c.name, targetRaw, target, flag);
 
-                if (target == null || target.isBlank()) return;
+                if (target == null || target.isBlank() || target.equals(c.name)) return;
+                Room targetRoom = gameService.getRoom(roomCode);
+                Participant targetParticipant = targetRoom == null ? null : targetRoom.getParticipant(target);
+                if (targetParticipant == null || targetParticipant.isHost()) return;
 
                 if (byParticipating) {
                     gameService.setParticipatingFor(roomCode, target, flag);
@@ -329,11 +287,11 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
             // Keywords
             switch (payload) {
-                case "revealCards" -> gameService.reveal(roomCode);
-                case "resetRoom"   -> gameService.reset(roomCode);
+                case "revealCards" -> { if (isHost(roomCode, c.name)) gameService.reveal(roomCode); }
+                case "resetRoom"   -> { if (isHost(roomCode, c.name)) gameService.reset(roomCode); }
 
                 case "intentionalLeave" -> {
-                    gameService.handleIntentionalLeave(roomCode, c.name);
+                    gameService.exitParticipant(gameService.getRoom(roomCode), c.name);
                     return;
                 }
 
@@ -354,12 +312,11 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
                     return;
                 }
 
-                default -> log.debug("Ignored message: {}", payload);
+                default -> log.debug("Ignored unsupported command");
             }
         } catch (Throwable t) {
-            log.error("WS handleTextMessage failed (room={}, name={}, payload='{}')",
-                    roomCode, c.name, payload, t);
-            try { session.close(CloseStatus.SERVER_ERROR); } catch (Exception ignore) {}
+            log.error("WS command failed (room={}, name={})", roomCode, c.name);
+            gameService.closeSocket(session, CloseStatus.SERVER_ERROR);
             throw t;
         }
     }
@@ -371,32 +328,8 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
 
     @Override
     public void afterConnectionClosed(@NonNull WebSocketSession session, @NonNull CloseStatus status) {
-        Conn c = bySession.remove(session.getId());
-        if (c == null) {
-            log.info("WS CLOSE sid={} code={} reason={}", session.getId(), status.getCode(), status.getReason());
-            return;
-        }
-        final String roomCode = c.room;
-
-        log.info("WS CLOSE room={} name={} cid={} code={} reason={}",
-                roomCode, c.name, c.cid, status.getCode(), status.getReason());
-
-        try {
-            gameService.removeSession(session);
-            Room room = gameService.getRoom(roomCode);
-            if (room != null) {
-                if (gameService.hasOpenSession(room, c.name)) {
-                    gameService.cancelPendingDisconnect(room, c.name);
-                } else {
-                    gameService.scheduleDisconnect(room, c.name); // grace on unexpected close
-                }
-            }
-            gameService.ensureHost(roomCode, 0L, HOST_INACTIVE_MS);
-        } catch (Throwable t) {
-            log.error("WS afterConnectionClosed handling failed (room={}, name={})", roomCode, c.name, t);
-        }
+        forgetAuthenticated(session);
     }
-
     /* ---------------- helpers ---------------- */
 
     private static Map<String, String> parseQuery(URI uri) {
@@ -419,7 +352,7 @@ public class GameWebSocketHandler extends TextWebSocketHandler {
     }
 
     private String safeUri(WebSocketSession session) {
-        try { return String.valueOf(session.getUri()); } catch (Exception e) { return "n/a"; }
+        try { return session.getUri().getPath(); } catch (Exception e) { return "n/a"; }
     }
 
     /** Check if caller is current host (by name). */

@@ -24,15 +24,8 @@ public class SignalController {
             @RequestParam("roomCode") String roomCode,
             @RequestParam("cid") String cid
     ) {
-        if (roomCode == null || roomCode.isBlank() || cid == null || cid.isBlank()) {
-            return ResponseEntity.noContent().build();
-        }
-        String name = gameService.getClientName(roomCode, cid);
-        Room room = gameService.getRoom(roomCode);
-        if (room != null && name != null) {
-            gameService.scheduleIntentionalDisconnect(room, name);
-            return ResponseEntity.accepted().build();
-        }
-        return ResponseEntity.noContent().build();
+        // CID-only beacons are no longer an authenticated lifecycle operation.
+        return ResponseEntity.status(410).build();
+
     }
 }

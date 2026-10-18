@@ -21,7 +21,7 @@ async function hostSetsSpectator(host: Page, name: string, spectator: boolean) {
   }).click();
 }
 
-test('spectator state follows the existing CID through refresh, back navigation and reconnect', async ({ browser }) => {
+test('spectator state follows the existing identity through refresh, back navigation and reconnect', async ({ browser }) => {
   const room = newRoomCode('SPECTATOR-REJOIN');
   const hostContext = await browser.newContext();
   const guestContext = await browser.newContext();
@@ -49,8 +49,8 @@ test('spectator state follows the existing CID through refresh, back navigation 
     await host.goto(`${roomUrlFor('Host', room)}&lang=en`);
     await guest.goto(`${roomUrlFor('Guest', room)}&lang=en`);
     await expect(row(host, 'Guest')).toBeVisible();
-    const originalCid = await guest.evaluate(() => sessionStorage.getItem('pp-cid'));
-    expect(originalCid).toBeTruthy();
+    const originalParticipantId = await guest.evaluate(() => (window as any).PPIdentity.read(new URL(location.href).searchParams.get('roomCode')).participantId);
+    expect(originalParticipantId).toBeTruthy();
 
     await hostSetsSpectator(host, 'Guest', true);
     await expectSpectator(guest, 'Guest', true);
@@ -60,13 +60,13 @@ test('spectator state follows the existing CID through refresh, back navigation 
 
     await guest.reload();
     await expectSpectator(guest, 'Guest', true);
-    expect(await guest.evaluate(() => sessionStorage.getItem('pp-cid'))).toBe(originalCid);
+    expect(await guest.evaluate(() => (window as any).PPIdentity.read(new URL(location.href).searchParams.get('roomCode')).participantId)).toBe(originalParticipantId);
     expect(hostCommands).toEqual(['setSpectator:Guest:true']);
 
     await guest.goto('/about');
     await guest.goBack();
     await expectSpectator(guest, 'Guest', true);
-    expect(await guest.evaluate(() => sessionStorage.getItem('pp-cid'))).toBe(originalCid);
+    expect(await guest.evaluate(() => (window as any).PPIdentity.read(new URL(location.href).searchParams.get('roomCode')).participantId)).toBe(originalParticipantId);
 
     const socketsBeforeReconnect = guestSockets;
     await guest.evaluate(() => (window as any).__ppWs.close(4002, 'spectator-rejoin-test'));

@@ -28,7 +28,7 @@ public final class RoomIdentityRegistry {
     }
 
     /** Deterministic clock seam; elapsed time must be monotonic. */
-    RoomIdentityRegistry(Object roomMonitor, LongSupplier nanoTime, Duration lease) {
+    public RoomIdentityRegistry(Object roomMonitor, LongSupplier nanoTime, Duration lease) {
         this.monitor = Objects.requireNonNull(roomMonitor);
         this.nanoTime = Objects.requireNonNull(nanoTime);
         this.leaseNanos = Objects.requireNonNull(lease).toNanos();
@@ -139,6 +139,15 @@ public final class RoomIdentityRegistry {
                     .map(entry -> entry.owner).filter(Objects::nonNull).toList();
             entries.clear();
             return owners;
+        }
+    }
+
+    /** Guard delayed presence work against any intervening reconnect/revocation. */
+    public boolean isDisconnected(Ownership owner) {
+        synchronized (monitor) {
+            if (closed || owner == null || !roomInstanceId.equals(owner.roomInstanceId())) return false;
+            Entry entry = entries.get(owner.participantId());
+            return entry != null && entry.generation == owner.generation() && entry.owner == null;
         }
     }
 

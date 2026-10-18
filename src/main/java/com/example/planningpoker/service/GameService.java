@@ -29,6 +29,19 @@ public class GameService {
 
     // --- optional snapshot hook (non-fatal, may be null) ---
     private final RoomSnapshotter snapshotter;
+    private java.util.function.LongSupplier identityClock = System::nanoTime;
+
+    /** Monotonic clock seam for deterministic identity/lifecycle tests. */
+    public GameService(java.util.function.LongSupplier identityClock) {
+        this();
+        this.identityClock = Objects.requireNonNull(identityClock);
+    }
+
+    public GameService(java.util.function.LongSupplier identityClock, ScheduledExecutorService scheduler) {
+        this(identityClock);
+        this.scheduler.shutdownNow();
+        this.scheduler = Objects.requireNonNull(scheduler);
+    }
 
     /** Default ctor for tests (no Spring context): snapshotter stays null. */
     public GameService() {
@@ -57,7 +70,7 @@ public class GameService {
 
     // Stable client-id per tab -> last known name in that room
     private final Map<String, String> clientToName = new ConcurrentHashMap<>();
-    private static String mapKey(String roomCode, String cid) { return roomCode + "|" + cid; }
+    private static String mapKey(String roomCode, String cid) { return roomCode.length() + ":" + roomCode + "|" + cid; }
     public String getClientName(String roomCode, String cid) {
         if (cid == null) return null;
         return clientToName.get(mapKey(roomCode, cid));
@@ -68,6 +81,29 @@ public class GameService {
         }
     }
 
+    // Defer network I/O until the identity/game-state transaction releases Room.
+    private final ThreadLocal<List<Runnable>> outbound = new ThreadLocal<>();
+    public void roomTransaction(Room room, Runnable action) {
+        if (outbound.get() != null) {
+            synchronized (room) { action.run(); }
+            return;
+        }
+        List<Runnable> pending = new ArrayList<>();
+        outbound.set(pending);
+        try { synchronized (room) { action.run(); } }
+        finally {
+            outbound.remove();
+            for (Runnable send : pending) send.run();
+        }
+    }
+
+    public void closeSocket(WebSocketSession session, CloseStatus status) {
+        Runnable close = () -> { try { session.close(status); } catch (IOException ignored) {} };
+        if (outbound.get() != null) outbound.get().add(close);
+        else close.run();
+    }
+
+
     private final JsonMapper objectMapper = new JsonMapper();
 
     // --- disconnect & host grace ---
@@ -75,7 +111,7 @@ public class GameService {
     private static final long HOST_GRACE_UNEXPECTED_MS = 5_000L;
     private static final long HOST_GRACE_INTENTIONAL_MS = 2_000L;
 
-    private final ScheduledExecutorService scheduler =
+    private ScheduledExecutorService scheduler =
             Executors.newSingleThreadScheduledExecutor(r -> {
                 Thread t = new Thread(r, "presence-grace");
                 t.setDaemon(true);
@@ -88,7 +124,7 @@ public class GameService {
     private static String key(Room room, String name) { return room.getCode() + "|" + name; }
 
     // --- rooms ---
-    public Room getOrCreateRoom(String roomCode) { return rooms.computeIfAbsent(roomCode, Room::new); }
+    public Room getOrCreateRoom(String roomCode) { return rooms.computeIfAbsent(roomCode, code -> new Room(code, identityClock)); }
     public Room getRoom(String roomCode) { return rooms.get(roomCode); }
     public Room room(String roomCode) { return getRoom(roomCode); }
 
@@ -768,8 +804,15 @@ public class GameService {
         });
     }
 
-    /** Serialize all text writes per connection without buffering or changing payloads. */
+    /** Defer transaction output, then serialize writes per connection without changing payloads. */
     public boolean sendText(WebSocketSession session, String message) throws IOException {
+        if (outbound.get() != null) {
+            outbound.get().add(() -> {
+                try { sendText(session, message); }
+                catch (IOException ignored) { removeSession(session); }
+            });
+            return session.isOpen();
+        }
         synchronized (session) {
             if (!session.isOpen()) return false;
             session.sendMessage(new TextMessage(message));
@@ -823,6 +866,29 @@ public class GameService {
 
     public void cancelPendingDisconnect(Room room, String participantName) {
         cancelPresenceTimers(room, participantName);
+    }
+
+    public void scheduleDisconnect(Room room, RoomIdentityRegistry.Ownership owner) {
+        Runnable inactive = () -> roomTransaction(room, () -> {
+            if (getRoom(room.getCode()) != room || !room.identities().isDisconnected(owner)) return;
+            Participant p = room.getParticipantByCid(owner.participantId().toString()).orElse(null);
+            if (p == null) return;
+            p.setActive(false);
+            broadcastParticipantLeft(room, p.getName());
+            broadcastRoomState(room);
+            snapshot(room, p.getName());
+        });
+        scheduler.schedule(inactive, LEAVE_GRACE_MS, TimeUnit.MILLISECONDS);
+        scheduler.schedule(() -> roomTransaction(room, () -> {
+            if (getRoom(room.getCode()) != room || !room.identities().isDisconnected(owner)) return;
+            Participant p = room.getParticipantByCid(owner.participantId().toString()).orElse(null);
+            if (p == null || !p.isHost() || p.isActive()) return;
+            p.setHost(false);
+            String next = room.assignNewHostIfNecessary(p.getName());
+            if (next != null) broadcastHostChange(room, p.getName(), next);
+            broadcastRoomState(room);
+            snapshot(room, p.getName());
+        }), HOST_GRACE_UNEXPECTED_MS, TimeUnit.MILLISECONDS);
     }
 
     public void scheduleDisconnect(Room room, String participantName) {
@@ -938,9 +1004,42 @@ public class GameService {
         } catch (JacksonException ignored) { }
     }
 
+    public void revokeParticipantIdentity(Room room, String name) {
+        clientToName.entrySet().removeIf(entry -> {
+            if (!entry.getKey().startsWith(mapKey(room.getCode(), "")) || !entry.getValue().equals(name)) return false;
+            String id = entry.getKey().substring(mapKey(room.getCode(), "").length());
+            try { room.identities().revoke(UUID.fromString(id)); } catch (IllegalArgumentException ignored) {}
+            return true;
+        });
+    }
+
+    /** Explicit exit is final; invalidate before releasing the name. */
+    public void exitParticipant(Room room, String name) {
+        cancelPresenceTimers(room, name);
+        revokeParticipantIdentity(room, name);
+        for (WebSocketSession session : new ArrayList<>(sessionToRoomMap.keySet())) {
+            if (sessionToRoomMap.get(session) == room && name.equals(sessionToParticipantMap.get(session))) {
+                removeSession(session);
+                try { sendText(session, "{\"type\":\"exited\"}"); } catch (IOException ignored) {}
+                closeSocket(session, new CloseStatus(4400, "Participation ended"));
+            }
+        }
+        room.removeParticipant(name);
+        // Keep the intentional-leave host grace; the removed host is no longer eligible.
+        scheduler.schedule(() -> roomTransaction(room, () -> {
+            if (getRoom(room.getCode()) != room) return;
+            String next = room.assignNewHostIfNecessary(null);
+            if (next != null) broadcastHostChange(room, name, next);
+            broadcastRoomState(room);
+        }), HOST_GRACE_INTENTIONAL_MS, TimeUnit.MILLISECONDS);
+        broadcastRoomState(room);
+        snapshot(room, name);
+    }
+
     public void kickParticipant(Room room, String targetName) {
         if (room == null || targetName == null) return;
 
+        revokeParticipantIdentity(room, targetName);
         String json;
         try {
             Map<String, Object> payload = new HashMap<>();
@@ -963,7 +1062,7 @@ public class GameService {
             try { sendText(s, json); } catch (IOException ignored) {}
             sessionToRoomMap.remove(s);
             sessionToParticipantMap.remove(s);
-            try { s.close(new CloseStatus(4001, "Kicked")); } catch (IOException ignored) {}
+            closeSocket(s, new CloseStatus(4001, "Kicked"));
         }
 
         cancelPresenceTimers(room, targetName);
@@ -983,6 +1082,8 @@ public class GameService {
 
     public void closeRoom(Room room) {
         if (room == null) return;
+        room.identities().close();
+        clientToName.keySet().removeIf(key -> key.startsWith(mapKey(room.getCode(), "")));
 
         try {
             Map<String, Object> payload = new HashMap<>();
@@ -999,13 +1100,13 @@ public class GameService {
             if (room.equals(e.getValue())) toClose.add(e.getKey());
         }
         for (WebSocketSession s : toClose) {
-            try { s.close(new CloseStatus(4000, "Room closed")); } catch (IOException ignored) {}
+            closeSocket(s, new CloseStatus(4000, "Room closed"));
             sessionToRoomMap.remove(s);
             sessionToParticipantMap.remove(s);
         }
 
         for (Participant p : new ArrayList<>(room.getParticipants())) cancelPresenceTimers(room, p.getName());
-        rooms.remove(room.getCode());
+        rooms.remove(room.getCode(), room);
         roomSpecialsSelected.remove(room.getCode()); // cleanup selection
     }
 

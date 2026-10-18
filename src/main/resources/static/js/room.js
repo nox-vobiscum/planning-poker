@@ -86,7 +86,6 @@
 
     roomCode: ds.room || url.searchParams.get('roomCode') || 'demo',
     youName:  ds.participant || url.searchParams.get('participantName') || 'Guest',
-    cid: null,
     ws: null,
     connected: false,
 
@@ -127,7 +126,6 @@
     hardRedirect: null,
 
     // preflight guards
-    cidWasNew: true,
     _preflightMarkedOk: false,
 
     // short pending guard for local sequence changes
@@ -135,21 +133,9 @@
     _pendingSeqUntil: 0
   };
 
-  /*** ---------- Stable per-tab client id ---------- ***/
-  const CIDKEY = 'pp-cid';
-  try {
-    const existing = window.PPStorage.read('sessionStorage', CIDKEY, value => !!value);
-    if (existing) { state.cid = existing; state.cidWasNew = false; }
-    else {
-      state.cid = Math.random().toString(36).slice(2) + '-' + Date.now();
-      sessionStorage.setItem(CIDKEY, state.cid);
-      state.cidWasNew = true;
-    }
-  } catch {
-    state.cid = 'cid-' + Date.now();
-    state.cidWasNew = true;
-  }
-
+  let identityCredential = window.PPIdentity.read(state.roomCode);
+  let identityBlocked = false;
+  let exitRequested = false;
   // Canonicalize URL params (no reload) for shareable links
   (function canonicalizeRoomUrl() {
     try {
@@ -180,10 +166,7 @@
   }
   function wsUrl() {
     const proto = location.protocol === 'https:' ? 'wss://' : 'ws://';
-    return proto + location.host + '/gameSocket' +
-      '?roomCode=' + encodeURIComponent(state.roomCode) +
-      '&participantName=' + encodeURIComponent(state.youName) +
-      '&cid=' + encodeURIComponent(state.cid);
+    return proto + location.host + '/gameSocket';
   }
   function syncHostClass() {
     document.body.classList.toggle('is-host', !!state.isHost);
@@ -296,7 +279,7 @@
   let rcAttempts = 0;
   let lastInboundAt = 0;
 
-  function send(line) { if (state.ws && state.ws.readyState === 1) state.ws.send(line); }
+  function send(line) { if (state.connected && state.ws && state.ws.readyState === 1) state.ws.send(line); }
 
   function startHeartbeat() {
     stopHeartbeat();
@@ -327,7 +310,7 @@
   function stopWatchdog() { if (wdTimer) { clearInterval(wdTimer); wdTimer = null; } }
 
   function scheduleReconnect(reason) {
-    if (state.hardRedirect) return;
+    if (state.hardRedirect || identityBlocked) return;
     if (rcTimer) return;
     const attempt = rcAttempts++;
     const base = Math.min(RECO_MAX_MS, RECO_BASE_MS * Math.pow(2, attempt));
@@ -352,7 +335,7 @@
 
   function wake(reason) {
     if (reason == null) reason = 'wake';
-    if (state.hardRedirect) return;
+    if (state.hardRedirect || identityBlocked) return;
     if (navigator && 'onLine' in navigator && !navigator.onLine) {
       console.info(TAG, 'wake: offline — will wait for "online"');
       return;
@@ -375,6 +358,7 @@
 
   // Single, final version of connectWS (handles text + JSON)
   function connectWS() {
+    if (identityBlocked) return;
     const u = wsUrl();
 
     if (state.ws && (state.ws.readyState === 0 || state.ws.readyState === 1)) {
@@ -391,25 +375,21 @@
     try { window.__ppWs = s; } catch {}
 
     s.onopen = function () {
-      state.connected = true;
+      if (state.ws !== s) return;
       lastInboundAt = Date.now();
-      resetReconnectBackoff();
-      startHeartbeat();
-      startWatchdog();
-
-      try { send('rename:' + encodeURIComponent(state.youName)); } catch {}
-      try { send('requestSync'); } catch {}
-      setTimeout(function () { try { send('requestSync'); } catch {} }, 400);
-
-      try { renderParticipants(); } catch {}
+      const request = identityCredential
+        ? { version: 2, type: 'resume', roomCode: state.roomCode, ...identityCredential }
+        : { version: 2, type: 'newJoin', roomCode: state.roomCode, participantName: state.youName };
+      s.send(JSON.stringify(request));
     };
-
     s.onclose = function (ev) {
+      if (state.ws !== s) return;
       state.connected = false;
       stopHeartbeat();
       stopWatchdog();
 
       if (state.hardRedirect) { location.href = state.hardRedirect; return; }
+      if (identityBlocked) return;
 
       if (ev.code === 4000 || ev.code === 4001) {
         window.PPRoomReturn?.clear(state.roomCode, state.youName);
@@ -418,21 +398,11 @@
         return;
       }
 
-      if (ev.code === 4005) {
-        window.PPRoomReturn?.clear(state.roomCode, state.youName);
-        if (state.cidWasNew) {
-          const redirectUrl =
-            '/invite?roomCode=' + encodeURIComponent(state.roomCode) +
-            '&participantName=' + encodeURIComponent(state.youName) +
-            '&nameTaken=1';
-          state.hardRedirect = redirectUrl;
-          location.replace(redirectUrl);
-          return;
-        }
-        showToast(isDe() ? 'Name bereits in Verwendung' : 'Name already in use');
+      if ([4005, 4401, 4406, 4409].includes(ev.code)) {
+        identityBlocked = true;
+        showToast(isDe() ? 'Teilnahme konnte nicht fortgesetzt werden. Bitte neu beitreten.' : 'Unable to resume participation. Please join again.');
         return;
       }
-
       console.warn(TAG, 'onclose', ev.code, ev.reason || '');
       scheduleReconnect('close');
     };
@@ -442,9 +412,54 @@
     };
 
     s.onmessage = function (ev) {
+      if (state.ws !== s) return;
       lastInboundAt = Date.now();
 
       if (ev.data === 'pong') return;
+      // Handle proofs before the generic message/debug path; never retain them there.
+      try {
+        const identity = JSON.parse(ev.data);
+        if (identity.type === 'identityGrant') {
+          window.PPIdentity.save(state.roomCode, identity);
+          identityCredential = window.PPIdentity.read(state.roomCode);
+          s.send('identityAck');
+          return;
+        }
+        if (identity.type === 'identityReady') {
+          state.connected = true;
+          if (identity.yourName) state.youName = identity.yourName;
+          resetReconnectBackoff(); startHeartbeat(); startWatchdog();
+          send('requestSync');
+          if (exitRequested) send('intentionalLeave');
+          return;
+        }
+        if (identity.type === 'identityChallenge') {
+          s.send('identityPong:' + identity.nonce);
+          return;
+        }
+        if (identity.type === 'identityError') {
+          state.connected = false;
+          if (identity.reason === 'expired' && identityCredential) return;
+          identityBlocked = true;
+          stopHeartbeat(); stopWatchdog();
+          if (identity.reason === 'invalid') window.PPIdentity.clear(state.roomCode, identityCredential);
+          const active = identity.reason === 'activeElsewhere';
+          showToast(active
+            ? (isDe() ? 'Diese Teilnahme ist bereits in einem anderen Fenster aktiv.' : 'This participation is already active in another window.')
+            : (isDe() ? 'Teilnahme nicht möglich. Bitte neu beitreten oder die Seite neu laden.' : 'Unable to join. Please join again or reload the page.'));
+          return;
+        }
+        if (identity.type === 'exited') {
+          identityBlocked = true;
+          window.PPIdentity.clear(state.roomCode, identityCredential);
+          window.PPRoomReturn?.clear(state.roomCode, state.youName);
+          location.assign('/');
+          return;
+        }
+        if (identity.type === 'kicked' || identity.type === 'roomClosed') {
+          window.PPIdentity.clear(state.roomCode, identityCredential);
+        }
+      } catch { /* Non-JSON game frames continue below. */ }
 
       // Legacy plain-text roster frames first
       if (typeof ev.data === 'string') {
@@ -505,7 +520,6 @@
     switch (m.type) {
       case 'you': {
         if (m.yourName && m.yourName !== state.youName) { state.youName = m.yourName; setText('#youName', state.youName); }
-        if (m.cid && m.cid !== state.cid) { state.cid = m.cid; try { sessionStorage.setItem(CIDKEY, state.cid); } catch {} }
         window.PPRoomReturn?.remember(state.roomCode, state.youName);
         break;
       }
@@ -1975,12 +1989,14 @@
   })();
 
   function wireMenuEvents() {
-    let leavingRoom = false;
     const leaveRoom = function () {
-      if (leavingRoom) return;
-      leavingRoom = true;
-      window.PPRoomReturn?.clear(state.roomCode, state.youName);
-      location.assign('/');
+      if (exitRequested) return;
+      if (!state.connected) {
+        showToast(isDe() ? 'Zum endgültigen Verlassen ist eine Verbindung erforderlich.' : 'A connection is required to end participation.');
+        return;
+      }
+      exitRequested = true;
+      send('intentionalLeave');
     };
     $('#leaveRoomBtn')?.addEventListener('click', leaveRoom);
     $('#menuLeaveRoomBtn')?.addEventListener('click', leaveRoom);
@@ -2273,6 +2289,7 @@
   
   /*** ---------- Name preflight: run once per (room+name) per tab ---------- ***/
   async function preflightNameCheck() {
+    if (identityCredential) return; // The server authenticates this resume, not the display name.
     let isReloadLike = false;
     try {
       var nav = null;
@@ -2337,7 +2354,7 @@
     preloadMessages();
 
     await preflightNameCheck();
-    if (state.hardRedirect) return;
+    if (state.hardRedirect || identityBlocked) return;
 
     syncHostClass();
     ensureBootstrapDeck();     // make cards available immediately on first paint

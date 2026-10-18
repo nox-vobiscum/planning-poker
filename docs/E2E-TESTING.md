@@ -46,6 +46,15 @@ PP_BASE_URL=http://localhost:8080 npx playwright test tests/specials-stats.spec.
 PP_BASE_URL=http://localhost:8080 npx playwright test tests/persistence.spec.ts tests/reset-flow.spec.ts tests/sequence-change.spec.ts tests/specials-stats.spec.ts -c playwright.config.ts --trace=retain-on-failure --retries=0
 ```
 
+### Run the participant identity/rejoin matrix
+```bash
+PP_BASE_URL=http://localhost:8080 npx playwright test tests/identity-entrypoints.spec.ts tests/identity-exit-recovery.spec.ts tests/identity-handshake.spec.ts tests/spectator-rejoin.spec.ts tests/presence-lifecycle.spec.ts tests/room-exit.spec.ts tests/storage.spec.ts tests/room-return.spec.ts tests/duplicate-name-suffix.spec.ts tests/reload-stays-in-room.spec.ts tests/reconnect-state.spec.ts tests/invite-name-check.spec.ts --reporter=line
+```
+
+Some identity specs explicitly launch Chromium and WebKit. A fresh browser context
+with retained localStorage approximates a browser restart, but it does not replace
+the required real iPhone installed-PWA rollout check.
+
 ### Run the full suite
 ```bash
 PP_BASE_URL=http://localhost:8080 npx playwright test -c playwright.config.ts --retries=0 --trace=retain-on-failure
@@ -188,7 +197,15 @@ These are **guaranteed by `room.js`** and safe to use in specs:
   - ♾️/∞ appears **only** for sequence `fib.enh` and is **absent** in other sequences (e.g. `fib.scrum`, `pow2`).
 
 - **Preflight bypass**
-  - `?preflight=1` can be appended to the room URL to skip name preflight checks in tests that spin rooms rapidly.
+  - Legacy `?preflight=1` URLs remain renderable for compatibility, but they grant
+    no access and do not bypass authenticated WebSocket admission.
+
+- **Identity authority**
+  - Use `window.PPIdentity` only to inspect/setup test candidates. A stored proof is
+    not authorization until the server sends `identityReady`.
+  - Never place proof tokens in URLs, traces, test titles or debug output.
+  - Wait for the server-confirmed participant state instead of assuming that page
+    close or browser-context disposal has completed a disconnect.
 
 ## 11) Avoiding future “helper explosions”
 
@@ -198,4 +215,4 @@ These are **guaranteed by `room.js`** and safe to use in specs:
 
 ---
 
-**Last updated:** 2025-10-13
+**Last updated:** 2026-10-18

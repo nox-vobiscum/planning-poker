@@ -350,62 +350,63 @@ WebSocket contracts. No additional change request is active.
 
 ## Appendix E – Identity & Name Handling
 
-### Current naming and storage
+### Current identity authority
 
-`storage.js` reads only `planningpoker-theme`, `pp-name`,
-`pp-room`, `pp-cid`, and `pp-pf-ok:<room>:<name>`. Invalid or unavailable
-storage uses the existing defaults. `pp-flash` is consumed once;
-`pp-presence:<encoded-name>` retains its existing write-only behavior.
-Test and guard variables use `PP_BASE_URL`, `PP_ROOM_URL`, `PP_MENU_JS`,
-`PP_ROOM_JS`, and `PP_CHECK_LOG` only. The public domain is
-`planning-poker.at`. Retired compatibility aliases and unread properties
-have been removed. FTPS paths and room data are unchanged.
+The room server, not a display name or browser-generated ID, owns participant
+identity. Each live `Room` has one `RoomIdentityRegistry`. A new participant gets
+a server-generated room-instance UUID, participant UUID and 256-bit resume token;
+the registry stores only the token hash. The participant UUID is the internal
+GameService lookup key. Display names remain unique per live room but are never
+authentication credentials.
 
-- **Per-tab Client ID (`cid`)**  
-  Each browser tab gets a stable `cid` via `sessionStorage` (`pp-cid`). The `cid` is sent on `/gameSocket` connect and bound to the participant identity server-side.
+The `/gameSocket` admission protocol is versioned JSON. A `newJoin` receives an
+`identityGrant`; the browser persists it and acknowledges with `identityAck` before
+the participant becomes active. A `resume` must present the complete proof. After
+successful admission the server sends `identityReady` and a nonce-based
+`identityChallenge`; only the current connection owner may renew its 45-second
+lease or issue room commands. Concurrent sockets, stale callbacks and late commands
+cannot take ownership from the active generation.
 
-- **Name preflight runs only on brand-new tabs**  
-  On `/room`, the duplicate-name preflight check runs **only** on the first visit of a **new tab**.  
-  Reloads and Back/Forward **do not** trigger the preflight and **do not** redirect.  
-  Implementation: `room.js` derives `state.cidWasNew` from `sessionStorage(pp-cid)` and, on success, marks the tuple `(roomCode|name)` as “ok in this tab” via `sessionStorage` key `pp-pf-ok:<room>:<name>` to avoid repeat checks.
+### Browser storage and migration
 
-- **Invite flow remains the UX source of truth for choosing a free name**  
-  `/invite` probes availability via `GET /api/rooms/{room}/name-available?name=...`.  
-  On collision, the page shows an inline hint and a safe suggestion (e.g., `Alice (2)`), optionally gated via `confirm()`. (`invite-name-check.js`)
+`identity.js` stores one proof per room under `pp-identity-v2:<roomCode>`, preferring
+`localStorage`, then `sessionStorage`, then memory for current-page continuity. The
+fallback mode is visible to the user because it limits restart recovery. Proofs are
+never placed in URLs, form fields, name checks, debug history or logs.
 
-- **Server enforces uniqueness (current behavior: hard reject for clashes)**  
-  The server guarantees unique display names **per room**.  
-  If a different `cid` tries to join a room with a name that is already in use, the WebSocket is **closed with code `4005`** (“Name already in use”).  
-  The client handles this only on **brand-new tabs**: `room.js` intercepts `ws.onclose(code===4005)` and **redirects to**  
-  `/invite?roomCode=...&participantName=...&nameTaken=1` using `location.replace(...)`.  
-  Existing tabs (reloads/back/forward) never auto-redirect on `4005`; they simply show a toast and stop reconnect loops.
-  
-  WebSocket protocol: On join the server replays the current roster to the new client via participantJoined events (JSON + legacy text). The client handles {type:"participantJoined","name":"…"} and updates the participant list. The server also replies pong to ping.
+Legacy `pp-cid` and `pp-pf-ok:*` session entries are deleted during bootstrap and
+are never read for admission. There is deliberately no CID compatibility fallback.
+Existing legacy clients therefore perform a deliberate new join after rollout.
+The migration changes no FTPS room path or stored room snapshot format; identity
+proofs and ownership leases are live, instance-local state and are not restored
+from snapshots.
 
-  Client: Handle JSON socket events participantJoined / participantLeft. Update local participant model (supports Set, Array, Map/dict, and nested room.participants) and re-render the participant list. Heartbeat pong frames are ignored by parser but reset the stale timer.
+### Entry, rejoin and exit rules
 
-  > Note: If the service is later switched to *canonicalization* (auto-suffixing to `Name (N)`), the server will send a `you{yourName}` identity message after join and the UI will update `#youName` without redirect. Tests and this appendix should then be updated accordingly.
-
-- **Identity confirmation**  
-  After a successful join, the server sends a `you` message with the canonical `yourName` (and `cid`); the client reconciles its local `youName` immediately.
-
-- **Reload expectation**  
-  Reloading the room page keeps the user in the room — **no invite redirect** and **no** preflight re-run.
+- Home, invite, direct room entry, refresh and Back all converge on the same
+  server-authenticated WebSocket path. HTTP rendering and name-availability checks
+  are advisory and never grant room access.
+- A valid proof restores the same participant, vote and spectator state. It does
+  not restore a host role that was transferred while the participant was away.
+- Invalid, expired, revoked or wrong-room-instance proofs require an explicit new
+  join. A matching display name alone cannot resume or take over a participant.
+- An active owner causes `activeElsewhere`; the second socket does not displace it.
+- `intentionalLeave` is proof-bound and acknowledged with `exited`. Lost
+  acknowledgements are retried safely. Exit, kick and room closure revoke the proof.
+- Name availability and suggestions use the live Room state, including pending
+  grants. The WebSocket admission remains the final atomic uniqueness check.
 
 ### Acceptance criteria
-1. **New tab**, first entry into a room with a **duplicate name** → server returns `4005`, client redirects to `/invite?...&nameTaken=1`, invite shows hint and suggestion.  
-2. **New tab**, first entry with a **free name** → enter room normally.  
-3. **Reload** while already in the room → stay in room, **no** preflight, **no** redirect.  
-4. **Back/Forward** navigation back to the room → **no** preflight, **no** redirect.
 
-### Implementation touchpoints
-- `room.js`  
-  - `pp-cid` creation & `state.cidWasNew` detection  
-  - preflight guard (`pp-pf-ok:<room>:<name>`)  
-  - WebSocket `onclose(code===4005)` redirect for brand-new tabs only
-- `invite-name-check.js`  
-  - inline availability probe + suggestion flow
-- Server (WebSocket handler/service)  
-  - uniqueness enforcement  
-  - `you{yourName}` identity message after successful join
+1. Refresh, Back, short reconnect and browser/PWA restart with a valid stored proof
+   resume exactly one participant and preserve vote/spectator state.
+2. Parallel connections, foreign/invalid/revoked proofs and display-name-only
+   attempts cannot take over an existing participation.
+3. Explicit exit or kick prevents proof reuse; a subsequent join receives a fresh
+   participant identity and normal defaults.
+4. Host transfer is retained across the former host's rejoin; a recreated room code
+   never accepts a proof from the previous room instance.
+
+Implementation and rollout evidence are maintained in
+`docs/PARTICIPANT-IDENTITY-REJOIN.md`.
 

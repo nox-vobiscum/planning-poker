@@ -45,9 +45,8 @@ accounts, registry packages or filesystem paths. FTPS room paths are unchanged.
 │               Koyeb                           │
 │  - Docker Container                          │
 │  - HTTPS/WSS and TLS                          │
-│  - Auto-scaling                              │
 │  - Health Checks                             │
-│  - Zero-downtime deploys                     │
+│  - Deployment behavior set in Koyeb dashboard│
 └──────────────┬───────────────────────────────┘
                │
                ▼
@@ -136,7 +135,14 @@ koyeb app create planning-poker --git github.com/nox-vobiscum/planning-poker
 2. Koyeb detects changes
 3. Builds Docker image
 4. Runs health checks
-5. Deploys with zero downtime
+5. Activates the deployment according to the Koyeb service settings
+
+Do not assume that this application can use overlapping or multiple active
+instances safely. Live rooms, participant identity registries, proof hashes,
+connection ownership and leases are process-local. A replacement process creates
+new room-instance identities; existing browser proofs cannot resume there even if
+room snapshots restore other game data. Plan this release as an interruption of
+all active rooms.
 
 **Manual deployment:**
 ```bash
@@ -167,10 +173,20 @@ koyeb deployment redeploy <deployment-id>
 - Configured in Koyeb dashboard
 - Scales based on CPU/memory/requests
 
+The checked-in `koyeb.yaml` does not declare replica counts, autoscaling, sticky
+sessions, deployment overlap or drain behavior. The active dashboard settings were
+not inspected in this documentation step. Until a shared room/identity authority is
+implemented, configure exactly one active application replica and do not enable
+autoscaling. Sticky routing alone would not make failover or a new deployment able
+to validate proofs issued by another process.
+
 **Manual scaling:**
 ```bash
-koyeb service scale planning-poker --min 1 --max 3
+koyeb service scale planning-poker --min 1 --max 1
 ```
+
+Treat this command as an example only; verify the current Koyeb CLI syntax and the
+active service settings before the approved rollout.
 
 ---
 
@@ -849,23 +865,72 @@ curl http://localhost:8080/actuator/metrics/http.server.requests
 - [ ] Connection pooling configured (if applicable)
 - [ ] Unnecessary debug logging disabled
 - [ ] Health check interval reasonable (30s)
-- [ ] Auto-scaling configured (Koyeb)
+- [ ] Exactly one active replica confirmed; auto-scaling disabled for process-local rooms/identity
 
 ---
 
 ## Rollout Checklist
 
-Before deploying to production:
+### Participant identity migration release
 
-- [ ] All tests pass locally
-- [ ] E2E tests pass against staging
-- [ ] Configuration reviewed
-- [ ] Environment variables set
-- [ ] Rollback plan prepared
-- [ ] Stakeholders notified
-- [ ] Monitoring enabled
-- [ ] Backup completed
-- [ ] Documentation updated
+This rollout replaces the legacy browser-generated CID admission scheme. Bootstrap
+removes obsolete `pp-cid` and `pp-pf-ok:*` session data. There is no compatibility
+fallback: browsers without a valid version-2 proof must join deliberately and get a
+new participant identity. Identity proofs are not part of FTPS snapshots.
+
+#### Final approval gate
+
+- [ ] Confirm the feature branch is reviewed, merged by the approved process and
+      the exact release commit is recorded.
+- [ ] Run the complete Java and Playwright regression suites as a separate gate;
+      archive commands, commit, engine versions and results. Step 6 itself does not
+      claim these suites have run.
+- [ ] Confirm from the Koyeb dashboard that the service has exactly one active
+      replica, autoscaling is disabled, and record the actual deployment overlap,
+      connection-drain and rollback behavior. These facts are not in `koyeb.yaml`.
+- [ ] Review production environment variables, allowed WebSocket origin, health
+      check `/healthz`, FTPS setting and rollback target without exposing secrets.
+- [ ] Announce a maintenance window and tell users that existing rooms/connections
+      may be interrupted and legacy participants may need to join again.
+- [ ] If persistent rooms are enabled in the actual environment, back up snapshots
+      and verify restore access. Do not claim persistence is enabled based on docs;
+      both checked-in prod properties and `koyeb.yaml` currently default it off.
+
+#### Controlled deployment
+
+- [ ] Verify no important room is active, or obtain explicit acceptance that it can
+      be interrupted. Do not rely on a rolling overlap to preserve participation.
+- [ ] Push/merge only after explicit approval; watch the Koyeb build and health gate.
+- [ ] Record old and new deployment IDs plus the release commit before traffic moves.
+- [ ] Confirm one healthy active deployment and no unintended second replica.
+- [ ] If health, WebSocket admission or identity smoke tests fail, redeploy the
+      recorded last-good deployment. Rollback also changes the process-local room
+      instance and cannot restore current connection ownership.
+
+#### Production smoke tests
+
+- [ ] `/healthz`, home, invite and room creation respond through HTTPS.
+- [ ] Two separate browsers join one unique test room; voting and roster updates
+      cross the production WSS connection.
+- [ ] Refresh, Back and a short network interruption resume the same participant;
+      vote and spectator status remain unchanged and no duplicate row appears.
+- [ ] A concurrent second tab cannot take over an active participant.
+- [ ] Host transfer survives former-host reconnect; guest host actions remain denied.
+- [ ] Explicit leave permits a fresh join; kick and room closure prevent old-proof
+      resume; recreating the same room code rejects the previous room proof.
+- [ ] Check application logs for identity tokens or raw proof payloads. None may be
+      present.
+
+#### Real iPhone installed-PWA gate
+
+- [ ] Record iPhone model, iOS version, PWA install state and release commit.
+- [ ] Vote and toggle spectator/participation, fully close and reopen the PWA after
+      each state, and confirm the same single participant and retained state.
+- [ ] Suspend beyond the reconnect window and confirm authenticated resume.
+- [ ] Test concurrent Safari/PWA ownership, host transfer without role reclamation,
+      explicit leave, kick and recreated-room rejection.
+- [ ] Record observed results. Any failure blocks final release acceptance and must
+      not be replaced by a name-based or client-only workaround.
 
 ---
 

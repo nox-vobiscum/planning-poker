@@ -1,7 +1,8 @@
 # Participant identity and rejoin implementation
 
-Current status: steps 1–4 and the automated part of step 5 are completed on the
-feature branch. The physical iPhone/PWA check and step 6 remain.
+Current status: steps 1–6 are completed on the feature branch. The complete
+regression suite, deployment smoke tests and physical iPhone/PWA check remain
+explicit final-release gates.
 No production rollout is approved by completion of this step.
 
 ## Step 1: isolated identity core (completed)
@@ -462,3 +463,39 @@ Step 6 remains separately gated: finish architecture/API/user/deployment
 documentation and prepare the controlled rollout. Do not deploy until the user
 explicitly approves it. The real iPhone/PWA result must be recorded before final
 completion. STOP after the separate step-5 validation commit.
+
+## Step 6: documentation and rollout preparation (completed)
+
+Completed on 2026-10-18. No application code, production infrastructure, push,
+merge or deployment was changed in this step.
+
+- Architecture, API, developer, E2E and bilingual user documentation now describe
+  the version-2 server-issued identity proof, acknowledgement, ownership lease,
+  rejoin/exit behavior and name-independent authorization.
+- The legacy CID migration is explicit: `pp-cid` and `pp-pf-ok:*` are deleted and
+  never accepted as a compatibility authentication path. Proofs are browser-local,
+  room-instance-bound and excluded from snapshots, URLs and logs.
+- Deployment guidance records that `koyeb.yaml` does not specify replica count,
+  autoscaling, sticky routing, overlap or drain behavior. Those dashboard facts are
+  unverified. The process-local design requires exactly one active replica.
+- The rollout is prepared as a maintenance-window deployment that may interrupt
+  existing rooms. The checklist separates the unrun complete regression suite,
+  deployment, production smoke tests and real installed-iPhone-PWA validation.
+- A contradiction search removed the operational CID handshake and zero-downtime/
+  autoscaling claims from current documentation. Historical implementation notes in
+  this file remain intentionally chronological.
+
+### Open rollout risks
+
+1. Actual Koyeb replica, autoscaling, overlap and connection-drain settings are not
+   represented in the repository and must be verified in the dashboard.
+2. A process replacement invalidates live identity registries and resume proofs;
+   FTPS snapshots do not restore connection ownership or credentials.
+3. The full regression suite has not been run for final release approval.
+4. Installed-PWA recovery after real iOS process eviction remains unverified until
+   the deployment candidate is available on an iPhone.
+
+### Release boundary
+
+Use the final approval checklist in `docs/DEPLOYMENT.md`. Any failed gate blocks
+release acceptance. No deployment is authorized by this documentation commit.

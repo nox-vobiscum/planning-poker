@@ -422,8 +422,13 @@ console.log('[ROOM]', 'message');
 **curl WebSocket test:**
 ```bash
 wscat -c ws://localhost:8080/gameSocket
-# Type: join:demo:test-123:DevBot
+# Type: {"version":2,"type":"newJoin","roomCode":"demo","participantName":"DevBot"}
+# Persist the identityGrant token securely, then type: identityAck
 ```
+
+Do not paste production proof tokens into terminals, screenshots, issues or logs.
+The browser client also answers server `identityChallenge` frames and is the
+reference implementation for authenticated resume.
 
 **Install wscat:**
 ```bash
@@ -515,7 +520,13 @@ curl http://localhost:8080/api/hello
 
 ### Add a New WebSocket Message Type
 
-1. **Update `GameWebSocketHandler`:**
+1. **Update the authenticated command path:**
+
+Keep admission, proof validation and ownership fencing in
+`IdentityWebSocketHandler`. Add participant/host commands to the delegated
+`GameWebSocketHandler` only after authentication; never parse identity from a name
+or client-supplied ID.
+
 ```java
 if (payload.startsWith("myCommand:")) {
     String arg = payload.substring("myCommand:".length());

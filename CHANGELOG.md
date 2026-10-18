@@ -2,6 +2,14 @@
 
 This file summarizes completed product changes.
 
+## 2026-10-18
+
+- Replaced browser-generated CID admission with server-issued, room-bound
+  participant identity proofs; refresh, reconnect and rejoin now preserve the
+  authenticated participant state while stale or parallel sockets are fenced.
+- Added durable explicit-exit recovery and documented the controlled single-replica
+  rollout, legacy client-data cleanup and final iPhone-PWA verification gate.
+
 ## 2026-10-16
 
 - Centered the mobile voting grid on shared fixed track axes while keeping

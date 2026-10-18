@@ -67,7 +67,9 @@ If the host actually leaves or does not return, the room lifecycle can transfer 
 
 ## Connection, return and room data
 
-The app synchronizes through WebSocket and automatically attempts to reconnect after short interruptions. Refreshing or returning with the same existing participant identity should preserve participating or spectator status.
+The app synchronizes through WebSocket and automatically attempts to reconnect after short interruptions. Refresh, Back navigation or reopening in the same browser can restore the same participation, including its vote and spectator status. The browser stores a room-specific resume proof for this purpose; the display name alone is insufficient.
+
+If durable browser storage is blocked, the app shows a notice and recovery may be limited to the current tab or page lifetime. After “Leave room”, removal by the host or room closure, the old proof is invalid. A server deployment can also interrupt active rooms and require a deliberate new join.
 
 Room lifetime and recoverability depend on server configuration. The server can persist room snapshots, but this does not guarantee a retention period. Planning Poker is not an authoritative ticket or results archive.
 
@@ -86,6 +88,7 @@ There are no global number, reveal or reset shortcuts.
 - **Cannot select a card:** check spectator status and connection; after reveal, wait for the next round.
 - **Changes are missing:** verify the room code, allow reconnection to complete or reload. Proxies/firewalls may block WebSocket.
 - **Name already in use:** display names alone are not identities. Use the existing invitation and browser session or choose a unique name.
+- **Participation cannot be resumed:** deliberately join again through the invitation. An old proof or one issued for another room cannot be transferred.
 
 ## Example round
 

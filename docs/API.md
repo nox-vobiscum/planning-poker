@@ -184,14 +184,22 @@ GET /room?roomCode=demo&participantName=Alice
 **Handshake:**
 ```javascript
 const ws = new WebSocket('ws://localhost:8080/gameSocket');
-ws.send('join:demo:cid-12345:Alice');
+ws.send(JSON.stringify({
+  version: 2,
+  type: 'newJoin',
+  roomCode: 'demo',
+  participantName: 'Alice'
+}));
 ```
 
 **Expected Response:**
+```json
+{"type":"identityGrant","roomInstanceId":"<uuid>","participantId":"<uuid>","token":"<secret>"}
 ```
-identity:Alice:cid-12345
-voteUpdate:{"type":"voteUpdate",...}
-```
+
+The client must persist the grant and send `identityAck`. Admission completes with
+`identityReady`, followed by the initial room state. For reconnect/rejoin, send a
+version-2 `resume` object containing `roomCode` and the complete stored proof.
 
 ---
 
@@ -204,25 +212,25 @@ voteUpdate:{"type":"voteUpdate",...}
 
 ### Client → Server Messages
 
-#### JOIN
-**Format:** `join:<roomCode>:<clientId>:<requestedName>`
+#### NEW JOIN / RESUME
 
-**Description:** Join a room with a unique client ID and requested name
-
-**Example:**
-```
-join:demo:abc-123:Alice
+**New join:**
+```json
+{"version":2,"type":"newJoin","roomCode":"demo","participantName":"Alice"}
 ```
 
-**Server Response:**
-```
-identity:Alice:abc-123
-voteUpdate:{...}
+**Resume:**
+```json
+{"version":2,"type":"resume","roomCode":"demo","roomInstanceId":"<uuid>","participantId":"<uuid>","token":"<secret>"}
 ```
 
-**Notes:**
-- Server may canonicalize name (trim, deduplicate)
-- Client ID persists across reconnects
+Names are display labels, not identity keys. The server issues participant identity
+and authenticates every resume. Legacy `join:<room>:<cid>:<name>` admission is not
+supported and no client-generated CID is accepted as authentication.
+
+After `identityGrant`, the client sends plain text `identityAck`. A grant expires
+if it is not acknowledged within 30 seconds. Room commands are accepted only after
+`identityReady` and only from the current connection owner.
 
 ---
 
@@ -484,7 +492,7 @@ participation:false
 #### INTENTIONAL LEAVE
 **Format:** `intentionalLeave`
 
-**Description:** Signal intentional disconnect (shorter grace period)
+**Description:** Permanently end the authenticated participant's room participation
 
 **Example:**
 ```
@@ -492,8 +500,9 @@ intentionalLeave
 ```
 
 **Behavior:**
-- Host grace: 2 seconds (vs. 5 seconds for unexpected)
-- Participant grace: 2 seconds
+- Revokes the current resume proof and removes the participant exactly once
+- Responds with `{"type":"exited"}` before closing when delivery succeeds
+- Retried safely by the client if the acknowledgement is lost
 
 ---
 
@@ -514,38 +523,26 @@ closeRoom
 
 ---
 
-#### PING
-**Format:** `ping`
+#### IDENTITY HEARTBEAT
 
-**Description:** Heartbeat to keep connection alive
-
-**Example:**
-```
-ping
-```
-
-**Server Response:**
-```
-pong
-```
-
-**Notes:**
-- Sent every 15 seconds by client (`room.js`)
-- Watchdog disconnects if no message received for 20 seconds
+The server sends `{"type":"identityChallenge","nonce":"<nonce>"}`. The current
+owner replies `identityPong:<nonce>`. A matching response renews the 45-second
+ownership lease. The nonce and ownership generation prevent stale sockets from
+renewing or issuing commands.
 
 ---
 
 ### Server → Client Messages
 
-#### IDENTITY
-**Format:** `identity:<canonicalName>:<clientId>`
+#### IDENTITY MESSAGES
 
-**Description:** Confirms identity after join
-
-**Example:**
-```
-identity:Alice:abc-123
-```
+- `identityGrant`: new proof containing `roomInstanceId`, `participantId` and the
+  one-time-delivered secret token; acknowledge before use.
+- `identityReady`: confirms authenticated admission and `yourName`.
+- `identityChallenge`: nonce for lease renewal.
+- `identityError`: admission/ownership failure with a reason such as `invalid`,
+  `expired`, `nameTaken`, `activeElsewhere`, `ackRequired` or `reloadRequired`.
+- `exited`: confirms completed intentional exit.
 
 ---
 
@@ -697,7 +694,8 @@ identity:Alice:abc-123
 #### PONG
 **Format:** `pong`
 
-**Description:** Heartbeat response
+**Description:** Transport heartbeat response. This resets the client watchdog but
+does not renew identity ownership; only a matching `identityPong` does that.
 
 **Example:**
 ```
@@ -839,13 +837,14 @@ interface RoomState {
 **Scenario:** Requested name is already taken
 
 **Server Response:**
-```
-identity:Alice-2:abc-123
+```json
+{"type":"identityError","reason":"nameTaken"}
 ```
 
 **Notes:**
-- Server appends suffix to deduplicate
-- Client receives canonicalized name
+- HTTP name checks and suggestions are advisory
+- WebSocket admission performs the final atomic uniqueness check
+- A name match never restores an existing identity
 
 ---
 
@@ -899,8 +898,8 @@ app.websocket.allowed-origins=http://localhost:*,http://127.0.0.1:*,https://plan
 // Connect
 const ws = new WebSocket('ws://localhost:8080/gameSocket');
 
-// Join
-ws.send('join:demo:client-123:Alice');
+// Request a new identity. Persist identityGrant securely, then send identityAck.
+ws.send(JSON.stringify({ version: 2, type: 'newJoin', roomCode: 'demo', participantName: 'Alice' }));
 
 // Vote
 ws.send('vote:Alice:5');
@@ -928,10 +927,12 @@ import websocket
 import json
 
 ws = websocket.create_connection("ws://localhost:8080/gameSocket")
-ws.send("join:demo:py-client:PythonBot")
+ws.send(json.dumps({"version": 2, "type": "newJoin", "roomCode": "demo", "participantName": "PythonBot"}))
 
 while True:
     msg = ws.recv()
+    # A real client must persist identityGrant, send identityAck, answer every
+    # identityChallenge and protect the secret token from logs and URLs.
     if msg.startswith("voteUpdate:"):
         state = json.loads(msg[len("voteUpdate:"):])
         print(state)

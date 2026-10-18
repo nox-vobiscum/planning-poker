@@ -67,7 +67,9 @@ Wenn der Host tatsächlich geht oder nicht zurückkehrt, kann die Rolle gemäß 
 
 ## Verbindung, Rückkehr und Raumdaten
 
-Die App synchronisiert über WebSocket und versucht nach kurzen Unterbrechungen automatisch, die Verbindung wiederherzustellen. Refresh oder Rückkehr mit derselben bestehenden Teilnehmeridentität sollen Teilnahme- und Zuschauerstatus erhalten.
+Die App synchronisiert über WebSocket und versucht nach kurzen Unterbrechungen automatisch, die Verbindung wiederherzustellen. Refresh, Zurück-Navigation oder erneutes Öffnen im selben Browser können dieselbe Teilnahme einschließlich Stimme und Zuschauerstatus wiederherstellen. Dafür speichert der Browser einen raumbezogenen Wiederherstellungsnachweis; der Anzeigename allein genügt nicht.
+
+Wenn dauerhafte Browserspeicherung blockiert ist, zeigt die App einen Hinweis und die Wiederherstellung kann auf den aktuellen Tab oder Seitenaufruf begrenzt sein. Nach „Raum verlassen“, Entfernen durch den Host oder Schließen des Raums ist der alte Nachweis ungültig. Auch ein Server-Deployment kann laufende Räume unterbrechen und einen neuen Beitritt erfordern.
 
 Lebensdauer und Wiederherstellbarkeit eines Raums hängen von der Serverkonfiguration ab. Der Server kann Raum-Snapshots persistent speichern; eine bestimmte Aufbewahrungszeit ist damit nicht garantiert. Planning Poker ersetzt kein dauerhaftes Ticket- oder Ergebnisarchiv.
 
@@ -86,6 +88,7 @@ Es gibt keine globalen Ziffern-, Reveal- oder Reset-Tastenkürzel.
 - **Karte nicht auswählbar:** Zuschauerstatus und Verbindung prüfen; nach dem Aufdecken die nächste Runde abwarten.
 - **Änderungen fehlen:** Raumcode prüfen, automatische Wiederverbindung abwarten oder neu laden. Proxies/Firewalls können WebSocket blockieren.
 - **Name bereits in Verwendung:** Anzeigenamen allein sind keine Identität. Bestehende Einladung und Browsersitzung nutzen oder einen eindeutigen Namen wählen.
+- **Teilnahme kann nicht fortgesetzt werden:** Über die Einladung bewusst neu beitreten. Ein alter oder in einem anderen Raum ausgestellter Wiederherstellungsnachweis kann nicht übernommen werden.
 
 ## Beispielrunde
 

@@ -166,3 +166,95 @@ remaining integration checks and the manual iPhone test.
 No full regression suite, production push or deployment. The test server used a
 separate local port. The real iPhone/PWA check and the complete entry-path matrix
 remain part of the later plan.
+## Step 3 handoff: prepared, NOT implemented
+
+Baseline: `d42b185` on `fix/participant-identity-rejoin` (step 2), preceded by
+`c1d585e` (step 1). Preparation changes documentation only. Do not push to main:
+main triggers production deployment. Wait for explicit authorization to start step 3.
+
+### Verified remaining blockers
+
+- `templates/index.html`: its inline submit handler calls `name-taken` before
+  submitting, even if the browser holds its own resume proof.
+- `templates/invite.html` / `static/js/invite-name-check.js`: name-available is
+  checked before submission; identity.js is currently loaded only on room.html.
+- `GameController.getRoom`: preflight=1 rejects any existing display name before
+  the browser can authenticate its proof. POST /join adds that flag.
+- `RoomNameCheckController`: checks live participants by exact trimmed name.
+- `rooms/web/NameAvailabilityController`: checks RoomStore snapshots using a
+  lowercase comparison. It can disagree with the live check or block released names.
+- `room.js`: resume already bypasses its own name preflight; new joins still use
+  the old preflight/cache keys and snapshot-backed name-available endpoint.
+- `IdentityWebSocketHandler`: pending initial grants reserve names in a private,
+  room-scoped map until ack/disconnect/timeout. Both name APIs must account for
+  these reservations without creating another independent reservation store.
+
+### Concrete implementation order for step 3
+
+1. Centralize the existing live-name availability/suggestion query in the server.
+   Use the same Room monitor and exact trimmed, case-sensitive comparison as live
+   joins. Include pending grant reservations. Move/access the existing reservations
+   through one room-owned source as needed; remove the old private source rather
+   than mirroring it. Reads must never create a room or reserve a name.
+2. Make name-taken and name-available thin adapters over that query. Preserve their
+   response shapes (boolean vs. available/suggestion), but remove snapshot reads
+   and lowercase normalization. Query results remain advisory: the authenticated
+   WebSocket join performs the atomic final reservation/check.
+3. Load the shared identity bootstrap on index and invite, before their submit
+   handlers need it. With a stored proof, submit toward room rendering without
+   the name-only check; the socket must still validate the proof. Without one,
+   retain regular name feedback based on the unified live query. Do not send
+   proofs in URLs, hidden form fields or name-check requests.
+4. Remove the identity-blind rejection from GET /room's preflight path. HTTP
+   rendering is not admission or authorization; WebSocket authentication remains
+   mandatory. Old preflight URLs must still render safely. Do not invent a client
+   flag that claims to prove identity. Keep POST validation of required fields.
+5. Consolidate room.js preflight and room-return behavior so reload/back/direct
+   room navigation do not depend on stale pp-pf-ok markers. A resume uses the
+   server's canonical name, even when the submitted display name differs. Do not
+   silently rename, discard a valid proof or create another participation.
+6. For invalid/revoked/wrong-instance proofs, give a clear result and a deliberate
+   route back to New Join. Clear only the matching rejected proof. No automatic
+   fallback to a new identity inside a failed resume; no takeover dialog. Check
+   that invalid-return links cannot loop back into the same failed attempt.
+7. Document the result, run only the focused tests below, commit separately and STOP.
+
+### Focused validation to add/adapt
+
+Backend (existing RoomNameCheckControllerTest plus focused availability/controller
+cases): both endpoints agree for free/taken/inactive/pending names; trimmed input;
+case-sensitive comparison; stale snapshots ignored; released names become free;
+preflight rendering never grants access; an availability/join race has one winner.
+Use controlled clocks for pending-reservation timeout; no sleeps for those checks.
+
+Browser (Chromium and WebKit, narrow entry-point specs):
+
+- Obtain a proof, disconnect, return through / and /invite: same participant UUID,
+  spectator state and vote; no duplicate participant or unnecessary name prompt.
+- Retain localStorage in a new browser context but discard sessionStorage to model
+  a restarted session. Wait for confirmed disconnection rather than assuming that
+  page.close immediately reached the server. This is not a real iPhone PWA test.
+- Direct /room, preflight=1, refresh and Back remain valid authenticated entries.
+- Wrong/revoked proof gives an error and requires deliberate New Join; matching
+  display name alone never restores identity. A different browser cannot take it.
+- Pending/active participation conflicts and two competing new joins are handled.
+- Different rooms remain independent; stale form/availability responses must not
+  override the current selected room/name or delete a newer proof.
+
+Reuse existing `identity-handshake.spec.ts`, `spectator-rejoin.spec.ts` and relevant
+`room-return.spec.ts` / duplicate-name cases as appropriate; do not run the full
+suite. Keep tests on an isolated local port (8091 was used and stopped in step 2).
+Run `npm run e2e:buildcheck` after TypeScript edits.
+
+### Boundaries and resumption checklist
+
+- Do not start step 4's lost-exit-ack retry/idempotency work, storage-failure UX or
+  broad storage migration here. No gameplay, layout, snapshot restoration or new
+  infrastructure changes. A storage read is only a candidate proof, never auth.
+- Real iPhone/PWA verification remains later/manual. Deployment remains gated.
+- At resumption: read this file, check branch/status and any commits after d42b185;
+  preserve user changes. Step 2 recorded 39 passing Java tests, six passing browser
+  cases and a passing TypeScript check. No tests were rerun for this preparation.
+- Suggested restart instruction: "Implement step 3 from the handoff in
+  docs/PARTICIPANT-IDENTITY-REJOIN.md. Run only targeted tests, document and commit
+  separately, then STOP. No deployment."

@@ -37,12 +37,21 @@ class IdentityWebSocketHandlerTest {
     private final class Client {
         final WebSocketSession socket = mock(WebSocketSession.class);
         final List<String> frames = new CopyOnWriteArrayList<>();
+        final Set<String> droppedTypes = ConcurrentHashMap.newKeySet();
         final AtomicBoolean open = new AtomicBoolean(true);
         Client(String query) throws Exception {
             when(socket.getId()).thenReturn("socket-" + ids.incrementAndGet());
             when(socket.getUri()).thenReturn(URI.create("ws://localhost/gameSocket" + query));
             when(socket.isOpen()).thenAnswer(i -> open.get());
-            doAnswer(i -> { frames.add(((TextMessage) i.getArgument(0)).getPayload()); return null; })
+            doAnswer(i -> {
+                String payload = ((TextMessage) i.getArgument(0)).getPayload();
+                try {
+                    Object type = json.readValue(payload, Map.class).get("type");
+                    if (droppedTypes.contains(type)) return null;
+                } catch (Exception ignored) {}
+                frames.add(payload);
+                return null;
+            })
                     .when(socket).sendMessage(any());
             doAnswer(i -> { open.set(false); gateway.afterConnectionClosed(socket, i.getArgument(0)); return null; })
                     .when(socket).close(any(CloseStatus.class));
@@ -183,6 +192,61 @@ class IdentityWebSocketHandlerTest {
         assertNull(service.getRoom("room").getParticipant("Host").getVote());
         owner.send("vote:Host:3");
         assertEquals("3", service.getRoom("room").getParticipant("Host").getVote());
+    }
+
+    @Test void authenticatedNavigationReleasePreservesStateAndFencesLateDisconnect() throws Exception {
+        Client old = client(); Map<String, Object> grant = join(old, "Host");
+        old.send("vote:Host:8");
+        Client spectator = client(); Map<String, Object> spectatorGrant = join(spectator, "Spectator");
+        spectator.send("participation:false");
+        spectator.send("releaseForNavigation");
+        Client resumedSpectator = client(); resume(resumedSpectator, spectatorGrant);
+
+        old.send("releaseForNavigation");
+        assertFalse(old.last("navigationReleased").isEmpty());
+        assertFalse(old.open.get());
+        var participant = service.getRoom("room").getParticipant("Host");
+        assertEquals("8", participant.getVote());
+        assertTrue(participant.isHost());
+        assertTrue(service.getRoom("room").getParticipant("Spectator").isSpectator());
+
+        Client resumed = client(); resume(resumed, grant);
+        assertFalse(resumed.last("identityReady").isEmpty());
+        gateway.afterConnectionClosed(old.socket, CloseStatus.NORMAL);
+        List.copyOf(scheduled).forEach(Runnable::run);
+        assertTrue(participant.isActive());
+        assertTrue(participant.isHost());
+        resumed.send("vote:Host:5");
+        assertEquals("5", participant.getVote());
+        assertTrue(service.getRoom("room").getParticipant("Spectator").isActive());
+    }
+
+    @Test void unauthenticatedOrStaleSocketCannotReleaseCurrentNavigationOwner() throws Exception {
+        Client pending = client(); begin(pending, "Pending");
+        pending.send("releaseForNavigation");
+        assertEquals("ackRequired", pending.last("identityError").get("reason"));
+
+        Client old = client(); Map<String, Object> grant = join(old, "Host");
+        old.send("releaseForNavigation");
+        Client current = client(); resume(current, grant);
+        old.send("releaseForNavigation");
+
+        Client parallel = client(); resume(parallel, grant);
+        assertEquals("activeElsewhere", parallel.last("identityError").get("reason"));
+        current.send("vote:Host:3");
+        assertEquals("3", service.getRoom("room").getParticipant("Host").getVote());
+    }
+
+    @Test void lostNavigationReleaseAcknowledgementDoesNotRetainOwnership() throws Exception {
+        Client old = client(); Map<String, Object> grant = join(old, "Host");
+        old.droppedTypes.add("navigationReleased");
+        old.send("releaseForNavigation");
+        assertTrue(old.last("navigationReleased").isEmpty());
+
+        Client resumed = client(); resume(resumed, grant);
+        assertFalse(resumed.last("identityReady").isEmpty());
+        resumed.send("vote:Host:8");
+        assertEquals("8", service.getRoom("room").getParticipant("Host").getVote());
     }
 
     @Test void staleSocketIsFencedAndLatePongOrCloseCannotDamageNewOwner() throws Exception {

@@ -499,3 +499,24 @@ merge or deployment was changed in this step.
 
 Use the final approval checklist in `docs/DEPLOYMENT.md`. Any failed gate blocks
 release acceptance. No deployment is authorized by this documentation commit.
+
+## Post-step-6 fix: authenticated navigation handoff
+
+Normal same-tab navigation now sends `releaseForNavigation` from the authenticated
+room socket before following an internal same-window link. The server checks the
+current ownership generation, releases only that connection, retains the participant
+identity and state, and replies with `navigationReleased`. The browser follows the
+link after the acknowledgement or after a bounded 450 ms timeout. `pagehide` sends
+the same command as a best-effort supplement for refresh and browser navigation.
+
+The handoff does not revoke the proof and does not change `claim()`, the 45-second
+lease, explicit exit, kick, room closure or host-transfer rules. Disconnect timers
+remain generation-fenced, so a late callback from the released socket cannot affect
+the resumed owner.
+
+No automatic `activeElsewhere` retry was added. A secure retry would require an
+additional server-verifiable same-tab handoff credential; browser-local state alone
+would not prove that a competing socket is the same tab. If both the handoff command
+and transport close are delayed beyond the 450 ms navigation timeout, the return can
+still receive the truthful parallel-owner error until the old owner is released or
+its lease expires. This residual edge case preserves exclusive ownership.

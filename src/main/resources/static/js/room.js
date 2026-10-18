@@ -276,8 +276,40 @@
   let rcTimer = null;
   let rcAttempts = 0;
   let lastInboundAt = 0;
+  let navigationHandoff = null;
+  const NAVIGATION_HANDOFF_TIMEOUT_MS = 450;
 
   function send(line) { if (state.connected && state.ws && state.ws.readyState === 1) state.ws.send(line); }
+
+  function finishNavigationHandoff() {
+    if (!navigationHandoff) return;
+    const pending = navigationHandoff;
+    navigationHandoff = null;
+    clearTimeout(pending.timer);
+    pending.navigate();
+  }
+
+  function releaseForNavigation(navigate) {
+    if (navigationHandoff || exitRequested) return;
+    const socket = state.ws;
+    if (!state.connected || !socket || socket.readyState !== WebSocket.OPEN) {
+      navigate();
+      return;
+    }
+    navigationHandoff = {
+      navigate: navigate,
+      timer: setTimeout(finishNavigationHandoff, NAVIGATION_HANDOFF_TIMEOUT_MS)
+    };
+    try { socket.send('releaseForNavigation'); }
+    catch { finishNavigationHandoff(); }
+  }
+
+  function releaseNavigationBestEffort() {
+    if (exitRequested || navigationHandoff || !state.connected) return;
+    const socket = state.ws;
+    if (!socket || socket.readyState !== WebSocket.OPEN) return;
+    try { socket.send('releaseForNavigation'); } catch {}
+  }
 
   function startHeartbeat() {
     stopHeartbeat();
@@ -439,6 +471,11 @@
         }
         if (identity.type === 'identityChallenge') {
           s.send('identityPong:' + identity.nonce);
+          return;
+        }
+        if (identity.type === 'navigationReleased') {
+          state.connected = false;
+          finishNavigationHandoff();
           return;
         }
         if (identity.type === 'identityError') {
@@ -2214,6 +2251,19 @@
     });
     window.addEventListener('online', function () { wake('online'); }, true);
     window.addEventListener('pageshow', function () { wake('pageshow'); }, true);
+    window.addEventListener('pagehide', releaseNavigationBestEffort, true);
+    document.addEventListener('click', function (event) {
+      if (event.defaultPrevented || event.button !== 0 || event.metaKey || event.ctrlKey ||
+          event.shiftKey || event.altKey) return;
+      const target = event.target;
+      const link = target instanceof Element ? target.closest('a[href]') : null;
+      if (!link || link.hasAttribute('download') || (link.target && link.target !== '_self')) return;
+      const destination = new URL(link.href, location.href);
+      if (destination.origin !== location.origin ||
+          (destination.pathname === location.pathname && destination.search === location.search && destination.hash)) return;
+      event.preventDefault();
+      releaseForNavigation(function () { location.assign(destination.href); });
+    }, true);
 
     startWatchdog();
 

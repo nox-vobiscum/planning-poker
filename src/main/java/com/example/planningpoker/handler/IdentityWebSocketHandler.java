@@ -13,6 +13,7 @@ import tools.jackson.databind.json.JsonMapper;
 
 import java.util.*;
 import java.util.concurrent.*;
+import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.function.LongSupplier;
 
 /** Version 2 admission boundary. No credential is accepted through URLs or legacy CIDs. */
@@ -63,6 +64,7 @@ public class IdentityWebSocketHandler extends TextWebSocketHandler {
             admit(c, payload);
             return;
         }
+        AtomicBoolean navigationReleased = new AtomicBoolean();
         service.roomTransaction(c.room, () -> {
             if (connections.get(session.getId()) != c) return;
             if (service.getRoom(c.room.getCode()) != c.room) { reject(c, "invalid", 4401); return; }
@@ -82,11 +84,20 @@ public class IdentityWebSocketHandler extends TextWebSocketHandler {
                     return;
                 }
                 if ("identityAck".equals(payload)) return; // Duplicate acknowledgement is harmless.
+                if ("releaseForNavigation".equals(payload)) {
+                    detach(c);
+                    navigationReleased.set(true);
+                    return;
+                }
                 try { commands.handleTextMessage(session, message); }
                 catch (Exception ignored) { reject(c, "commandFailed", 1011); }
             });
             if (!allowed) reject(c, "expired", 4408);
         });
+        if (navigationReleased.get()) {
+            send(c, Map.of("type", "navigationReleased"));
+            service.closeSocket(session, new CloseStatus(4410, "Navigation released"));
+        }
     }
 
     private void admit(Connection c, String payload) {

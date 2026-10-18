@@ -232,6 +232,12 @@ After `identityGrant`, the client sends plain text `identityAck`. A grant expire
 if it is not acknowledged within 30 seconds. Room commands are accepted only after
 `identityReady` and only from the current connection owner.
 
+Before same-tab app navigation, the authenticated current owner may send
+`releaseForNavigation`. The server releases only that connection's current
+ownership generation, retains the participant identity and room state, and replies
+with `navigationReleased`. This is distinct from `intentionalLeave`, which revokes
+the proof and removes the participant.
+
 ---
 
 #### RENAME
@@ -542,6 +548,8 @@ renewing or issuing commands.
 - `identityChallenge`: nonce for lease renewal.
 - `identityError`: admission/ownership failure with a reason such as `invalid`,
   `expired`, `nameTaken`, `activeElsewhere`, `ackRequired` or `reloadRequired`.
+- `navigationReleased`: confirms that the current owner's connection generation
+  was released for same-tab navigation without removing the participant.
 - `exited`: confirms completed intentional exit.
 
 ---

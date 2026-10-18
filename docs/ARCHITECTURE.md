@@ -426,6 +426,7 @@ instance, so a recreated room with the same code cannot accept an old proof.
 | `identityAck` | Pending grant | Confirm durable receipt before participant activation |
 | `identityPong:<nonce>` | Owner | Renew the current connection lease |
 | `ping` | Owner | Transport watchdog ping; does not renew ownership |
+| `releaseForNavigation` | Owner | Release the current ownership generation for same-tab navigation while retaining identity and room state |
 | `rename:<newName>` | Self | Rename current participant |
 | `vote:<name>:<value>` | Self | Cast a vote |
 | `revealCards` | Host | Reveal all votes |
@@ -449,6 +450,7 @@ instance, so a recreated room with the same code cannot accept an old proof.
 | `identityReady` | `{ yourName }` | Confirms authenticated admission |
 | `identityChallenge` | `{ nonce }` | Challenges the current owner to renew its lease |
 | `identityError` | `{ reason }` | Refuses invalid, expired, conflicting or incomplete admission |
+| `navigationReleased` | - | Confirms authenticated ownership release for same-tab navigation |
 | `exited` | - | Confirms explicit participant removal |
 | `pong` | - | Transport watchdog response; does not renew ownership |
 | `voteUpdate` | Full state object | Room state update |

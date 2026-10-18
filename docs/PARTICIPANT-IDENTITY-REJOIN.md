@@ -1,6 +1,7 @@
 # Participant identity and rejoin implementation
 
-Current status: steps 1–4 completed on the feature branch. Steps 5–6 remain.
+Current status: steps 1–4 and the automated part of step 5 are completed on the
+feature branch. The physical iPhone/PWA check and step 6 remain.
 No production rollout is approved by completion of this step.
 
 ## Step 1: isolated identity core (completed)
@@ -397,3 +398,67 @@ Step 5 remains separately gated: complete the focused integration matrix and man
 iPhone/PWA verification. Step 6 covers final architecture/API/user/deployment docs
 and the controlled rollout gate. No push or deployment was performed. STOP after
 this separate step-4 commit.
+
+## Step 5: integration validation and physical-device gate (automated part completed)
+
+Completed on 2026-10-18. This step changed no production code, protocol, gameplay,
+permissions, identity lifecycle or UI. It validated the integrated behavior from
+the server identity source through browser storage, entry points and room actions.
+
+### Automated validation
+
+**46 focused Java tests passed**: IdentityWebSocketHandlerTest (18),
+RoomIdentityRegistryTest (13), RoomNameCheckControllerTest (5),
+GameServiceNameTests (3), GameServiceSendTest (4) and RoomTest (3).
+
+Together these deterministically cover pending-grant and lease expiry, concurrent
+claims and rejoins, stale owners/messages/disconnects, heartbeat authorization,
+room isolation, invalid and revoked proofs, explicit exit, kick, host transfer,
+host-right non-reclamation, room closure and room-code reuse. Controlled clocks are
+used for timeout boundaries; the tests do not depend on sleeps for those checks.
+
+**41 focused browser cases passed** against the isolated local E2E server:
+
+- 39 identity, entry, reconnect, exit, storage and navigation cases, including the
+  explicit Chromium/WebKit identity-entry, handshake and lost-exit-ack scenarios;
+- refresh, Back navigation, simulated browser restart, temporary reconnect,
+  heartbeat, parallel-tab refusal, room isolation and canonical state restoration;
+- spectator and vote preservation, deliberate new join after invalid proof,
+  duplicate-name handling, stale form-response fencing and storage degradation;
+- two participant-action cases covering the spectator round trip, host transfer,
+  kick, guest/spectator restrictions and forged self-target rejection.
+
+The shared menu-event check, E2E TypeScript buildcheck and identity.js/room.js
+syntax checks also passed. No full test suite was run.
+
+### Required physical iPhone/PWA check
+
+The browser restart test uses a fresh browser context with retained localStorage;
+it is intentionally an approximation, not evidence for iOS process eviction or an
+installed PWA. The real-device check therefore remains a rollout gate and must be
+run on the deployment candidate before the identity change is declared complete:
+
+1. Join a uniquely named room from the installed PWA, vote, become a spectator and
+   return to participating; after each state, fully close and reopen the PWA and
+   confirm one participant row, the same state and no name prompt.
+2. Suspend the PWA beyond the reconnect window, reopen it and confirm that the
+   existing participation resumes without a duplicate or reset.
+3. Open the same participation concurrently in Safari and confirm that the active
+   owner remains authoritative and the second connection cannot take it over.
+4. Transfer the host role, restart the former host's PWA and confirm that it does
+   not reclaim host rights. Repeat with spectator state and a retained vote.
+5. Explicitly leave, then rejoin with the same name and confirm a fresh default
+   participation. Kick a participant and confirm its old proof cannot resume.
+6. Close and recreate a room with the same code and confirm that the prior room's
+   proof is rejected and cannot restore state in the new room instance.
+
+Record device/iOS version and results with the rollout evidence. A failed item
+blocks rollout and returns to the smallest responsible step; it does not authorize
+a workaround based on participant name or client-only state.
+
+### Next boundary
+
+Step 6 remains separately gated: finish architecture/API/user/deployment
+documentation and prepare the controlled rollout. Do not deploy until the user
+explicitly approves it. The real iPhone/PWA result must be recorded before final
+completion. STOP after the separate step-5 validation commit.

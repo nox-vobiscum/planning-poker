@@ -7,9 +7,10 @@ test('Result row announces non-consensus stats (Average/Median/Range) in English
   const hostName = 'HostSR';
   const guestName = 'GuestSR';
 
-  const ctx = await browser.newContext();
-  const host = await ctx.newPage();
-  const guest = await ctx.newPage();
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
 
   // Host joins
   await host.goto(`/room?roomCode=${encodeURIComponent(room)}&participantName=${encodeURIComponent(hostName)}`, {
@@ -41,5 +42,6 @@ test('Result row announces non-consensus stats (Average/Median/Range) in English
   await expect(sr).not.toContainText(/Konsens/i);          // no localized term
   await expect(sr).not.toContainText(/Consensus\s*🎉/i);    // non-consensus path (no "Consensus ...")
 
-  await ctx.close();
+  await guestContext.close();
+  await hostContext.close();
 });

@@ -2,18 +2,20 @@
 // - Viewer toggles Participation OFF → host sees 👁 chip on that row
 // - Viewer toggles Participation ON  → 👁 chip disappears
 
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { roomUrlFor, newRoomCode, ensureMenuOpen, ensureMenuClosed } from './_setup/prod-helpers.js';
-import { baseUrl } from './utils/env';
 
-test('Host list shows/removes observer icon when user toggles participation', async ({ page }) => {
+test('Host list shows/removes observer icon when user toggles participation', async ({ browser }) => {
   const room = newRoomCode('PROD-HOST-OBS');
   const hostName = 'Host';
   const viewerName = 'Viewer';
+  const hostContext = await browser.newContext();
+  const viewerContext = await browser.newContext();
+  const page = await hostContext.newPage();
+  const viewer = await viewerContext.newPage();
 
   // Open Host & Viewer
   await page.goto(roomUrlFor(hostName, room), { waitUntil: 'domcontentloaded' });
-  const viewer = await page.context().newPage();
   await viewer.goto(roomUrlFor(viewerName, room), { waitUntil: 'domcontentloaded' });
 
   // Base UI visible
@@ -50,4 +52,7 @@ test('Host list shows/removes observer icon when user toggles participation', as
 
   // Spectator eye chip disappears
   await expect(viewerRow.locator('.mini-chip.spectator')).toHaveCount(0);
+
+  await viewerContext.close();
+  await hostContext.close();
 });

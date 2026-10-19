@@ -2,18 +2,20 @@
 // - User toggles Participation OFF → all their cards disabled, host sees 👁 chip
 // - User toggles Participation ON  → some cards enabled again, 👁 chip disappears
 
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { roomUrlFor, newRoomCode, ensureMenuOpen, ensureMenuClosed } from './_setup/prod-helpers.js';
-import { baseUrl } from './utils/env';
 
-test('Participation toggle on prod: Spectator disables voting and updates host list', async ({ page }) => {
+test('Participation toggle on prod: Spectator disables voting and updates host list', async ({ browser }) => {
   const room = newRoomCode('PROD-OBS');
   const hostName = 'Host';
   const userName = 'Viewer';
+  const hostContext = await browser.newContext();
+  const userContext = await browser.newContext();
+  const page = await hostContext.newPage();
+  const user = await userContext.newPage();
 
   // Open Host & User
   await page.goto(roomUrlFor(hostName, room), { waitUntil: 'domcontentloaded' });
-  const user = await page.context().newPage();
   await user.goto(roomUrlFor(userName, room), { waitUntil: 'domcontentloaded' });
 
   // Base UI visible
@@ -65,4 +67,7 @@ test('Participation toggle on prod: Spectator disables voting and updates host l
 
   // On host page: spectator eye chip disappears from the viewer's row
   await expect(viewerRow.locator('.mini-chip.spectator')).toHaveCount(0);
+
+  await userContext.close();
+  await hostContext.close();
 });

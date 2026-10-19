@@ -13,6 +13,7 @@ import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
 import java.net.http.WebSocket;
 import java.time.Duration;
+import java.util.Map;
 import java.util.concurrent.CompletionStage;
 import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.TimeUnit;
@@ -66,8 +67,7 @@ class ApplicationSmokeTest {
 
             var messages = new LinkedBlockingQueue<String>();
             WebSocket socket = client.newWebSocketBuilder().connectTimeout(Duration.ofSeconds(10))
-                    .buildAsync(URI.create("ws://localhost:" + port
-                                    + "/gameSocket?roomCode=boot-smoke&participantName=Host"),
+                    .buildAsync(URI.create("ws://localhost:" + port + "/gameSocket"),
                             new WebSocket.Listener() {
                                 private final StringBuilder buffer = new StringBuilder();
 
@@ -83,18 +83,36 @@ class ApplicationSmokeTest {
                                 }
                             }).get(10, TimeUnit.SECONDS);
             try {
+                var mapper = new JsonMapper();
+                socket.sendText(mapper.writeValueAsString(Map.of(
+                        "version", 2,
+                        "type", "newJoin",
+                        "roomCode", "boot-smoke",
+                        "participantName", "Host")), true).get(5, TimeUnit.SECONDS);
+
+                boolean identityAcknowledged = false;
+                boolean identityReady = false;
                 long deadline = System.nanoTime() + TimeUnit.SECONDS.toNanos(10);
                 while (System.nanoTime() < deadline) {
                     String message = messages.poll(1, TimeUnit.SECONDS);
                     if (message != null && message.startsWith("{")) {
-                        var json = new JsonMapper().readTree(message);
-                        if ("voteUpdate".equals(json.path("type").asString())) {
+                        var json = mapper.readTree(message);
+                        String type = json.path("type").asString();
+                        if ("identityGrant".equals(type)) {
+                            assertFalse(identityAcknowledged, "identityGrant must only be acknowledged once");
+                            socket.sendText("identityAck", true).get(5, TimeUnit.SECONDS);
+                            identityAcknowledged = true;
+                        } else if ("identityReady".equals(type)) {
+                            assertTrue(identityAcknowledged, "identityReady must follow identityAck");
+                            assertEquals("Host", json.path("yourName").asString());
+                            identityReady = true;
+                        } else if ("voteUpdate".equals(type) && identityReady) {
                             assertFalse(json.path("cards").isEmpty());
                             return;
                         }
                     }
                 }
-                fail("No JSON room state received over WebSocket");
+                fail("No authenticated JSON room state received over WebSocket");
             } finally {
                 socket.abort();
             }

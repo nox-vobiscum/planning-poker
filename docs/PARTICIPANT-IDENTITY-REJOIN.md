@@ -520,3 +520,17 @@ would not prove that a competing socket is the same tab. If both the handoff com
 and transport close are delayed beyond the 450 ms navigation timeout, the return can
 still receive the truthful parallel-owner error until the old owner is released or
 its lease expires. This residual edge case preserves exclusive ownership.
+
+## Test cleanup 1: V2 smoke handshake and participant isolation
+
+The application smoke test now enters through the query-free WebSocket endpoint
+and verifies the complete `newJoin` -> `identityGrant` -> `identityAck` ->
+`identityReady` sequence before accepting the initial room state. The affected
+multi-participant browser tests create host and guest in separate browser contexts,
+so each participant has independent identity storage while all existing spectator,
+participation and ARIA assertions remain unchanged. This cleanup changes test code
+only; it does not alter application behavior.
+
+Targeted validation on 2026-10-19 passed: `ApplicationSmokeTest` (2 tests), the
+four affected Playwright specs in Chromium (4/4) and WebKit (4/4), plus the E2E
+TypeScript buildcheck. No full regression suite was run.

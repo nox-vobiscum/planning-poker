@@ -4,9 +4,10 @@ function rc(p='ARIA'){ return `${p}-${Date.now()}-${Math.floor(Math.random()*1e6
 
 test('Result row announces for screen readers on reveal', async ({ browser }) => {
   const room = rc();
-  const ctx = await browser.newContext();
-  const host = await ctx.newPage();
-  const guest = await ctx.newPage();
+  const hostContext = await browser.newContext();
+  const guestContext = await browser.newContext();
+  const host = await hostContext.newPage();
+  const guest = await guestContext.newPage();
 
   await host.goto(`/room?roomCode=${encodeURIComponent(room)}&participantName=Alice`, { waitUntil: 'domcontentloaded' });
   await expect(host.locator('html')).toHaveAttribute('data-ready','1');
@@ -24,5 +25,6 @@ test('Result row announces for screen readers on reveal', async ({ browser }) =>
   await expect(sr).toContainText(/Consensus/i);
   await expect(sr).not.toHaveText('');
 
-  await ctx.close();
+  await guestContext.close();
+  await hostContext.close();
 });

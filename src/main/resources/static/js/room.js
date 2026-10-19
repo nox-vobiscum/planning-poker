@@ -358,7 +358,7 @@
   }
 
   function pokeServerAndSync() {
-    try { if (state.ws && state.ws.readyState === 1) state.ws.send('ping'); } catch {}
+    try { send('ping'); } catch {}
     try { send('requestSync'); } catch {}
     setTimeout(function () { try { send('requestSync'); } catch {} }, 200);
   }

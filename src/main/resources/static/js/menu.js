@@ -80,7 +80,8 @@
   function openMenu(){
     if (!overlay || !panel || menuOpen) return;
     menuOpen = true;
-    invoker = document.activeElement;
+    const active = document.activeElement;
+    invoker = active === document.body || active === document.documentElement ? btnOpen : active;
     background = Array.from(document.body.children)
       .filter(el => el !== overlay && !['SCRIPT', 'STYLE', 'LINK'].includes(el.tagName))
       .map(el => ({ el, inert: el.inert }));

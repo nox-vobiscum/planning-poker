@@ -1,4 +1,5 @@
 import { test, expect } from '@playwright/test';
+import { newRoomCode, roomUrlFor } from './utils/env';
 
 const widths = [320, 375, 768, 769, 1280];
 
@@ -8,7 +9,7 @@ for (const width of widths) {
     const roomCode = `metadata-${width}-${Date.now()}-with-a-deliberately-long-room-code`;
     await page.setViewportSize({ width, height: 900 });
     await page.addInitScript(() => localStorage.setItem('planningpoker-theme', 'dark'));
-    await page.goto(`/room?roomCode=${encodeURIComponent(roomCode)}&participantName=${encodeURIComponent(participantName)}&lang=en`);
+    await page.goto(`${roomUrlFor(participantName, roomCode)}&lang=en`);
 
     const metadata = page.locator('.main-info');
     const participant = metadata.locator('.main-info-group--participant');
@@ -65,7 +66,7 @@ for (const theme of ['light', 'system'] as const) {
     await page.setViewportSize({ width: 375, height: 800 });
     await page.emulateMedia({ colorScheme: 'light' });
     await page.addInitScript(theme => localStorage.setItem('planningpoker-theme', theme), theme);
-    await page.goto(`/room?roomCode=metadata-${theme}-${Date.now()}&participantName=Theme%20Tester&lang=de`);
+    await page.goto(`${roomUrlFor('Theme Tester', newRoomCode(`METADATA-${theme}`))}&lang=de`);
 
     await expect(page.locator('.main-info')).toBeVisible();
     await expect(page.locator('.main-info .mi-label').first()).toHaveCSS('color', 'rgb(55, 65, 81)');
@@ -81,7 +82,7 @@ for (const theme of ['light', 'system'] as const) {
 for (const width of [601, 769, 805, 1280]) {
   test(`desktop metadata gives the participant only its required width at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
-    await page.goto(`/room?roomCode=room-with-available-space&participantName=Ada&lang=en`);
+    await page.goto(`${roomUrlFor('Ada', `${newRoomCode('METADATA')}-room-with-available-space`)}&lang=en`);
 
     const geometry = await page.evaluate(() => {
       const rect = (selector: string) => document.querySelector(selector)!.getBoundingClientRect();
@@ -113,7 +114,7 @@ for (const width of [601, 769, 805, 1280]) {
 
 test('desktop metadata caps a long participant while preserving the flexible room area', async ({ page }) => {
   await page.setViewportSize({ width: 805, height: 800 });
-  await page.goto(`/room?roomCode=${encodeURIComponent('Room-' + 'r'.repeat(100))}&participantName=${encodeURIComponent('Participant-' + 'n'.repeat(100))}&lang=en`);
+  await page.goto(`${roomUrlFor(`Participant-${'n'.repeat(68)}`, 'Room-' + 'r'.repeat(100))}&lang=en`);
 
   const geometry = await page.evaluate(() => {
     const metadata = document.querySelector('.main-info')!.getBoundingClientRect();

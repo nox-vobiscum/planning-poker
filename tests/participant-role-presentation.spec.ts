@@ -60,7 +60,7 @@ for (const width of [320, 1280]) {
   test(`long participant identity remains contained at ${width}px`, async ({ page }) => {
     await page.setViewportSize({ width, height: 800 });
     await page.addInitScript(() => localStorage.setItem('planningpoker-theme', 'light'));
-    await page.goto(roomUrlFor(`Participant-${'x'.repeat(80)}`, newRoomCode('LONGNAME')));
+    await page.goto(roomUrlFor(`Participant-${'x'.repeat(68)}`, newRoomCode('LONGNAME')));
 
     const row = page.locator('#liveParticipantList .participant-row');
     await expect(row).toHaveCount(1);
@@ -72,9 +72,12 @@ for (const width of [320, 1280]) {
       const chipRect = element.querySelector('.row-right .mini-chip')!.getBoundingClientRect();
       const identity = element.querySelector('.participant-identity')!;
       const roleRect = element.querySelector('.participant-role-host')?.getBoundingClientRect();
+      const rowStyle = getComputedStyle(element);
       return {
         nameContained: nameRect.right <= rowRect.right + 1,
         chipDelta: Math.abs((rowRect.left + rowRect.width / 2) - (chipRect.left + chipRect.width / 2)),
+        chipContained: chipRect.left >= rowRect.left - 1 && chipRect.right <= rowRect.right + 1,
+        chipRightDelta: Math.abs((rowRect.right - Number.parseFloat(rowStyle.paddingRight)) - chipRect.right),
         roleClearance: chipRect.left - (roleRect?.right ?? nameRect.right),
         identityWidth: identity.getBoundingClientRect().width,
         hostBackground: getComputedStyle(element).backgroundColor,
@@ -82,8 +85,13 @@ for (const width of [320, 1280]) {
       };
     });
     expect(geometry.nameContained).toBe(true);
-    expect(geometry.chipDelta).toBeLessThanOrEqual(1);
-    if (width === 320) expect(geometry.roleClearance, JSON.stringify(geometry)).toBeGreaterThanOrEqual(6);
+    if (width === 320) {
+      expect(geometry.chipContained).toBe(true);
+      expect(geometry.chipRightDelta, JSON.stringify(geometry)).toBeLessThanOrEqual(1);
+      expect(geometry.roleClearance, JSON.stringify(geometry)).toBeGreaterThanOrEqual(6);
+    } else {
+      expect(geometry.chipDelta).toBeLessThanOrEqual(1);
+    }
     expect(geometry.hostBackground).toBe('rgba(0, 0, 0, 0)');
     expect(geometry.overflow).toBeLessThanOrEqual(1);
   });

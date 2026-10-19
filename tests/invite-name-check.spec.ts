@@ -1,4 +1,4 @@
-import { test, expect, Page, Browser } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 
 test.describe('Invite name availability check', () => {
 
@@ -23,12 +23,10 @@ test.describe('Invite name availability check', () => {
     });
 
     // Also intercept the POST /join to keep the test on the page
-    let postedBody: string | null = null;
     await page.route('**/join', async route => {
       if (route.request().method() === 'POST') {
-        postedBody = await route.request().postData() || '';
-        // Simulate a redirect target quickly
-        await route.fulfill({ status: 302, headers: { location: '/room?ok=1' }, body: '' });
+        // Complete the intercepted submission without navigating away from the fixture page.
+        await route.fulfill({ status: 204 });
       } else {
         await route.fallback();
       }
@@ -52,7 +50,10 @@ test.describe('Invite name availability check', () => {
     await expect(banner).toContainText('Bob (2)');
 
     // Click primary action → input is updated and form is submitted
+    const postResponse = page.waitForResponse(response =>
+      response.request().method() === 'POST' && new URL(response.url()).pathname === '/join');
     await page.click('#nameCheckNotice #nameUseSuggestion');
+    const postedBody = (await postResponse).request().postData();
 
     // We should have posted with participantName=Bob (2)
     expect(postedBody).not.toBeNull();

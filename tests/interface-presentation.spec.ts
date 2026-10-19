@@ -41,8 +41,7 @@ test('blocked storage retains the standard appearance and usable theme controls'
   });
   await page.goto('/');
   await expect(page.locator('body')).toHaveCSS('font-family', /system-ui/);
-  await page.locator('#menuButton').click();
-  await page.locator('#themeDark').click();
+  await page.locator('#hcThemeDark').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
 });
 

@@ -1,14 +1,15 @@
-import { test, expect, chromium, firefox } from '@playwright/test';
+import { test, expect, chromium, webkit } from '@playwright/test';
 
 // Compare the same controls and state across engines, not font rasterization.
 for (const width of [375, 768, 1280]) {
   for (const theme of ['light', 'dark']) {
     test(`control geometry ${theme} at ${width}px`, async ({ baseURL }, testInfo) => {
       const measurements: Record<string, any[]> = {};
-      for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
+      for (const [engineName, engine] of Object.entries({ chromium, webkit })) {
         const browser = await engine.launch();
+        const context = await browser.newContext({ viewport: { width, height: 900 } });
         try {
-          const page = await browser.newPage({ viewport: { width, height: 900 } });
+          const page = await context.newPage();
           await page.addInitScript(({ theme }) => {
             localStorage.setItem('planningpoker-theme', theme);
           }, { theme });
@@ -28,25 +29,28 @@ for (const width of [375, 768, 1280]) {
             expect(size.height).toBeGreaterThanOrEqual(48);
           }
           await page.screenshot({ path: testInfo.outputPath(`${engineName}-room.png`), fullPage: true });
-          await page.locator('#menuButton').click();
-          await page.locator('#themeSystem').focus();
+          if (width <= 768) await page.locator('#menuButton').click();
+          const themeDark = width <= 768 ? '#themeDark' : '#hcThemeDark';
+          const themeSystem = width <= 768 ? '#themeSystem' : '#hcThemeSystem';
+          await page.locator(themeSystem).focus();
           await page.keyboard.press('Shift+Tab');
-          await expect(page.locator('#themeDark')).toHaveCSS('outline-style', 'solid');
+          await expect(page.locator(themeDark)).toHaveCSS('outline-style', 'solid');
           await page.mouse.move(0, 0);
           // Query and measure atomically: WebSocket updates can replace card nodes.
-          measurements[engineName] = await page.evaluate(() => Array.from(document.querySelectorAll('#cardGrid button,#revealButton,#menuButton,#copyRoomLink,#themeDark,#themeSystem'), el => {
+          measurements[engineName] = await page.evaluate(({ themeDark, themeSystem }) => Array.from(document.querySelectorAll(`#cardGrid button,#revealButton,#menuButton,#copyRoomLink,${themeDark},${themeSystem}`), el => {
             const css = getComputedStyle(el);
             const rect = el.getBoundingClientRect();
             return { label: el.id || el.textContent, width: rect.width, height: rect.height, radius: css.borderRadius, appearance: css.appearance };
-          }));
+          }), { themeDark, themeSystem });
           await page.screenshot({ path: testInfo.outputPath(`${engineName}-menu.png`) });
         } finally {
+          await context.close();
           await browser.close();
         }
       }
-      expect(measurements.chromium!.length).toBe(measurements.firefox!.length);
+      expect(measurements.chromium!.length).toBe(measurements.webkit!.length);
       measurements.chromium!.forEach((control, index) => {
-        const other = measurements.firefox![index];
+        const other = measurements.webkit![index];
         expect(control.appearance).toBe('none');
         expect(other.appearance, `${other.label}: ${JSON.stringify(other)}`).toBe('none');
         expect(other.radius).toBe(control.radius);

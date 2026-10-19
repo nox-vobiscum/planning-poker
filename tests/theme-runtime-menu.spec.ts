@@ -1,6 +1,7 @@
 import { test, expect } from '@playwright/test';
 
 test('Theme switch in Menu updates :root data-theme and reflects state', async ({ page }) => {
+  await page.setViewportSize({ width: 375, height: 800 });
   await page.goto('/');
 
   // Open the app menu
@@ -64,6 +65,7 @@ test('compact desktop theme control stays synchronized and supports keyboard and
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
   await expect(dark).toHaveAttribute('aria-pressed', 'true');
   await page.locator('#menuButton').click();
+  await expect(page.locator('#menuTheme')).toBeHidden();
   await expect(page.locator('#themeDark')).toHaveAttribute('aria-pressed', 'true');
   await page.keyboard.press('Escape');
 

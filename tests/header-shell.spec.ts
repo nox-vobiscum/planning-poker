@@ -49,9 +49,9 @@ for (const width of [320, 375, 768, 769, 1280]) {
       await expect(page.locator('html')).toHaveAttribute('lang', 'de');
       await expect(page.locator('#hcLangDE')).toHaveAttribute('aria-pressed', 'true');
       await expect(page.locator('#menuLangDE')).toHaveAttribute('aria-pressed', 'true');
-      if (width > 768) await trigger.click();
-      await page.locator('#themeLight').click();
+      await page.locator(width <= 768 ? '#themeLight' : '#hcThemeLight').click();
       await expect(page.locator('html')).toHaveAttribute('data-theme', 'light');
+      if (width > 768) await trigger.click();
       await page.keyboard.press('Escape');
       await expect(page.locator('#appMenuOverlay')).toBeHidden();
       await expect(trigger).toBeFocused();

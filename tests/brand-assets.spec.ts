@@ -53,10 +53,8 @@ for (const width of [320, 375, 768, 769, 1280]) {
 
 test('brand remains available with the system theme preference', async ({ page }) => {
   await page.goto('/');
-  await page.locator('#menuButton').click();
-  await page.locator('#themeSystem').click();
-  await expect(page.locator('#themeSystem')).toHaveAttribute('aria-pressed', 'true');
-  await page.keyboard.press('Escape');
+  await page.locator('#hcThemeSystem').click();
+  await expect(page.locator('#hcThemeSystem')).toHaveAttribute('aria-pressed', 'true');
   await expect(page.locator('.app-brand img')).toBeVisible();
   await expect(page.locator('.app-brand')).toHaveAccessibleName('Planning Poker');
 });

@@ -20,9 +20,7 @@ for (const saved of [null, 'invalid', 'light', 'dark', 'system']) {
     expect(await page.evaluate(() => (window as any).__earlyTheme)).toBe(mode === 'system' ? null : mode);
     expect(await page.evaluate(() => (window as any).PPUI.snapshot())).toEqual({ themeMode: mode, language: 'en' });
     expect(await page.evaluate(() => Object.keys((window as any).PPUI))).not.toContain('setMenuOpen');
-    await page.locator('#menuButton').click();
-    await expect(page.locator('#theme' + mode[0]!.toUpperCase() + mode.slice(1))).toHaveAttribute('aria-pressed', 'true');
-    await page.locator('#menuCloseButton').click();
+    await expect(page.locator('#hcTheme' + mode[0]!.toUpperCase() + mode.slice(1))).toHaveAttribute('aria-pressed', 'true');
     await page.reload();
     expect(await page.evaluate(() => (window as any).PPUI.snapshot().themeMode)).toBe(mode);
     if (mode === 'system') {
@@ -43,9 +41,9 @@ test('denied storage leaves preferences and dialog usable in memory', async ({ p
   expect(await page.evaluate(() => (window as any).PPUI.snapshot().themeMode)).toBe('system');
   await page.locator('#hcLangDE').click();
   await expect(page.locator('#hcLangDE')).toHaveAttribute('aria-pressed', 'true');
-  await page.locator('#menuButton').click();
-  await page.locator('#themeDark').click();
+  await page.locator('#hcThemeDark').click();
   await expect(page.locator('html')).toHaveAttribute('data-theme', 'dark');
+  await page.locator('#menuButton').click();
   await expect(page.locator('#menuButton')).toHaveAttribute('aria-expanded', 'true');
   await page.keyboard.press('Escape');
   await expect(page.locator('#menuButton')).toBeFocused();

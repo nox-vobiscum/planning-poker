@@ -17,9 +17,10 @@ for (const theme of ['light', 'dark', 'system']) {
           expect((await page.locator(selector).boundingBox())!.height).toBe(hamburger!.height);
         }
       }
-      await page.locator('#menuButton').click();
-      const selectors = ['#menuTheme'];
-      if (width <= 768) selectors.push('#menuLang');
+      if (width <= 768) await page.locator('#menuButton').click();
+      const selectors = width <= 768
+        ? ['#menuTheme', '#menuLang']
+        : ['.desktop-theme .preference-control', '#hcLang'];
       const reference = await page.locator('#hcLang').evaluate(el => {
         const css = getComputedStyle(el);
         return [css.backgroundColor, css.borderRadius, css.padding, css.gap, css.boxShadow];
@@ -43,12 +44,11 @@ for (const theme of ['light', 'dark', 'system']) {
         expect(await inactive.evaluate(el => getComputedStyle(el).color)).not.toBe(foreground);
         expect((await active.boundingBox())!.height).toBe(30);
       }
-      await page.locator('#menuCloseButton').click();
+      if (width <= 768) await page.locator('#menuCloseButton').click();
     }
     if (theme === 'system') {
       await page.emulateMedia({ colorScheme: 'dark' });
-      await page.locator('#menuButton').click();
-      await expect(page.locator('#themeSystem')).toHaveCSS('color', 'rgb(212, 212, 212)');
+      await expect(page.locator('#hcThemeSystem')).toHaveCSS('color', 'rgb(212, 212, 212)');
     }
   });
 }

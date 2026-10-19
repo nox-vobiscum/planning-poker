@@ -2,6 +2,18 @@
 
 This file summarizes completed product changes.
 
+## 2026-10-19
+
+- Released the server-issued participant identity and authenticated rejoin flow in
+  production at commit `486f087`. The release includes navigation handoff,
+  durable exit recovery, ownership fencing and the menu-focus accessibility fix.
+- Final validation passed 68 Java tests and 299 Playwright cases without failures;
+  the corrected project matrix then ran all 24 WebKit menu-focus cases and both
+  Chromium controls successfully.
+- Recorded rollback tag `pre-participant-identity-rejoin-20261019` at the previous
+  production commit `e6b3871`. Koyeb reported the new deployment healthy; the real
+  installed-iPhone PWA rejoin check remains a manual post-deployment gate.
+
 ## 2026-10-18
 
 - Replaced browser-generated CID admission with server-issued, room-bound

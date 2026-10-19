@@ -878,13 +878,26 @@ removes obsolete `pp-cid` and `pp-pf-ok:*` session data. There is no compatibili
 fallback: browsers without a valid version-2 proof must join deliberately and get a
 new participant identity. Identity proofs are not part of FTPS snapshots.
 
+#### 2026-10-19 production release record
+
+- Release commit: `486f087` on `main`.
+- Previous production commit and rollback tag:
+  `e6b3871` / `pre-participant-identity-rejoin-20261019`.
+- Pre-production regression: 68/68 Java tests; 299 Playwright cases passed with
+  zero failures. After correcting the WebKit project assignment, all 24 WebKit
+  menu-focus cases and both Chromium controls passed.
+- The Koyeb dashboard was manually confirmed healthy after deployment and showed
+  one of one instances running. Dashboard-only autoscaling, overlap and drain
+  settings remain operator-controlled and are not inferred from repository files.
+- The real installed-iPhone PWA rejoin scenario remains an explicit manual
+  post-deployment acceptance gate.
+
 #### Final approval gate
 
 - [ ] Confirm the feature branch is reviewed, merged by the approved process and
       the exact release commit is recorded.
 - [ ] Run the complete Java and Playwright regression suites as a separate gate;
-      archive commands, commit, engine versions and results. Step 6 itself does not
-      claim these suites have run.
+      archive commands, commit, engine versions and results.
 - [ ] Confirm from the Koyeb dashboard that the service has exactly one active
       replica, autoscaling is disabled, and record the actual deployment overlap,
       connection-drain and rollback behavior. These facts are not in `koyeb.yaml`.

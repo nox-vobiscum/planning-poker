@@ -407,6 +407,7 @@ from snapshots.
 4. Host transfer is retained across the former host's rejoin; a recreated room code
    never accepts a proof from the previous room instance.
 
-Implementation and rollout evidence are maintained in
-`docs/PARTICIPANT-IDENTITY-REJOIN.md`.
+The durable protocol contract is documented in `docs/ARCHITECTURE.md` and
+`docs/API.md`; rollout and rollback procedures are maintained in
+`docs/DEPLOYMENT.md`, with completed release evidence in `CHANGELOG.md`.
 

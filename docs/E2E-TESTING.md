@@ -71,7 +71,10 @@ npx playwright show-trace test-results/<...>/trace.zip
 
 ## 4) Project config essentials
 - `playwright.config.ts`:
-  - Single project by default; we select Chromium implicitly (no named projects necessary).
+  - The `chromium` project runs the general suite.
+  - `matrix-chromium`, `matrix-firefox` and `matrix-webkit` run the explicitly
+    assigned cross-engine specs. WebKit also owns the 24 mobile menu-focus cases;
+    engine-specific tests use explicit skips in the other projects.
   - `retries` and `use: { trace: 'retain-on-failure' }` are tuned for stability.
 - `tests/tsconfig.json`:
   - Strict enough to catch flaky code patterns; build sanity check:

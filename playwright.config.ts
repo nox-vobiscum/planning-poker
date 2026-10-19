@@ -1,6 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
 const browserMatrixSpecs = /(?:control-geometry|firefox-handshake-wake|menu-toggle-presentation|shape-language)\.spec\.ts/;
+const webkitMatrixSpecs = /(?:control-geometry|firefox-handshake-wake|menu-focus-restore|menu-toggle-presentation|shape-language)\.spec\.ts/;
 
 export default defineConfig({
   testDir: 'tests',
@@ -47,7 +48,7 @@ export default defineConfig({
     },
     {
       name: 'matrix-webkit',
-      testMatch: browserMatrixSpecs,
+      testMatch: webkitMatrixSpecs,
       dependencies: ['matrix-chromium'],
       use: { browserName: 'webkit' },
     },

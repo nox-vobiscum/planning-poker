@@ -1,5 +1,7 @@
 import { defineConfig } from '@playwright/test';
 
+const browserMatrixSpecs = /(?:control-geometry|firefox-handshake-wake|menu-toggle-presentation|shape-language)\.spec\.ts/;
+
 export default defineConfig({
   testDir: 'tests',
   testMatch: /.*\.spec\.ts$/,
@@ -25,4 +27,29 @@ export default defineConfig({
     screenshot: 'only-on-failure',
     video: 'retain-on-failure',
   },
+
+  projects: [
+    {
+      name: 'chromium',
+      testIgnore: browserMatrixSpecs,
+      use: { browserName: 'chromium' },
+    },
+    {
+      name: 'matrix-chromium',
+      testMatch: browserMatrixSpecs,
+      use: { browserName: 'chromium' },
+    },
+    {
+      name: 'matrix-firefox',
+      testMatch: browserMatrixSpecs,
+      dependencies: ['matrix-chromium'],
+      use: { browserName: 'firefox' },
+    },
+    {
+      name: 'matrix-webkit',
+      testMatch: browserMatrixSpecs,
+      dependencies: ['matrix-chromium'],
+      use: { browserName: 'webkit' },
+    },
+  ],
 });

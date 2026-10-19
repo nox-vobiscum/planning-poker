@@ -1,12 +1,10 @@
-import { expect, test, chromium, firefox } from '@playwright/test';
+import { expect, test } from '@playwright/test';
 
 for (const theme of ['light', 'dark', 'system']) {
   for (const width of [375, 1280]) {
-    test(`shape families ${theme} at ${width}px in Chromium and Firefox`, async ({ baseURL }, testInfo) => {
-      for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
-        const browser = await engine.launch();
-        try {
-          const page = await browser.newPage({ viewport: { width, height: 800 }, colorScheme: 'light' });
+    test(`shape families ${theme} at ${width}px`, async ({ baseURL, page, browserName }, testInfo) => {
+          await page.setViewportSize({ width, height: 800 });
+          await page.emulateMedia({ colorScheme: 'light' });
           await page.addInitScript(({ theme }) => {
             localStorage.setItem('planningpoker-theme', theme);
           }, { theme });
@@ -53,12 +51,8 @@ for (const theme of ['light', 'dark', 'system']) {
           expect((await measure('.menu-panel')).radius).toBe(width <= 768 ? '20px' : '0px');
           expect(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth)).toBe(true);
           if (theme === 'dark') {
-            await page.screenshot({ path: testInfo.outputPath(`${engineName}-${width}.png`), animations: 'disabled' });
+            await page.screenshot({ path: testInfo.outputPath(`${browserName}-${width}.png`), animations: 'disabled' });
           }
-        } finally {
-          await browser.close();
-        }
-      }
     });
   }
 }

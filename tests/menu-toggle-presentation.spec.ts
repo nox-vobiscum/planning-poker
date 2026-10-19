@@ -1,4 +1,4 @@
-import { test, expect, chromium, firefox } from '@playwright/test';
+import { test, expect } from '@playwright/test';
 import { newRoomCode, roomUrlFor } from './utils/env';
 
 const switches = [
@@ -9,12 +9,10 @@ const switches = [
   ['menuParticipationToggle', 'participation-toggle', 'estimating'],
 ] as const;
 
-for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
   for (const width of [320, 1280]) {
-    test(`${engineName}/${width}: responsive switches, keyboard events and guest permissions`, async ({}, testInfo) => {
-      const browser = await engine.launch();
+    test(`${width}: responsive switches, keyboard events and guest permissions`, async ({ browser, browserName }, testInfo) => {
 
-      const theme = engineName === 'chromium' ? 'dark' : 'light';
+      const theme = browserName === 'chromium' ? 'dark' : 'light';
       const hostContext = await browser.newContext({ viewport: { width, height: 720 }, reducedMotion: 'reduce' });
       const guestContext = await browser.newContext({ viewport: { width, height: 720 }, reducedMotion: 'reduce' });
       try {
@@ -112,8 +110,7 @@ for (const [engineName, engine] of Object.entries({ chromium, firefox })) {
         await host.keyboard.press('Escape');
         await expect(host.locator('#menuButton')).toBeFocused();
       } finally {
-        await browser.close();
+        await Promise.all([hostContext.close(), guestContext.close()]);
       }
     });
   }
-}

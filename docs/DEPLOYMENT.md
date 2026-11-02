@@ -197,17 +197,23 @@ active service settings before the approved rollout.
 **Multi-stage Dockerfile** (included in repository):
 
 ```dockerfile
-FROM maven:3.9.6-eclipse-temurin-25 AS build
+FROM maven:3.9.11-eclipse-temurin-25 AS build
 WORKDIR /app
+COPY .mvn/ .mvn/
+COPY mvnw .
 COPY pom.xml .
+RUN chmod +x ./mvnw && ./mvnw dependency:go-offline
 COPY src ./src
 RUN ./mvnw package -DskipTests
 
 FROM eclipse-temurin:25-jre-alpine
 WORKDIR /app
+RUN apk add --no-cache curl
 COPY --from=build /app/target/*.jar app.jar
 EXPOSE 8080
 ENTRYPOINT ["java", "-jar", "app.jar"]
+HEALTHCHECK --interval=30s --timeout=5s --start-period=40s --retries=3 \
+  CMD curl -fsS http://127.0.0.1:8080/ || exit 1
 ```
 
 **Build:**
